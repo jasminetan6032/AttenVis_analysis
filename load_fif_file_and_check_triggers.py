@@ -6,8 +6,10 @@ Created on Tue Dec 19 16:19:19 2023
 @author: jwt30
 """
 import os
-import quick_analyse_config as cfg
+import fix_triggers_config as cfg
 import mne
+import scipy
+import numpy
 
 def find_file(search_string,data_dir):
     for path, directory_names, filenames in os.walk(data_dir):
@@ -18,15 +20,15 @@ def find_file(search_string,data_dir):
     return file    
 
 
-participant = '130901'
+participant = '097201'
 
 transcend_dir = '/autofs/space/transcend/MEG/'
 
 local_dir = '/local_mount/space/hypatia/2/users/Jasmine/'
 
-data_dir = os.path.join(transcend_dir,'AttenVis',participant)
+data_dir = os.path.join(transcend_dir,'erm',participant,'20211104')
 
-run = 'run03_raw'
+run = 'raw'
 
 #load raw file
 raw_file = find_file(run, data_dir) 
@@ -65,7 +67,20 @@ new_event = [287037,0,32]
 fixed_events = numpy.insert(fixed_events,343,new_event,axis=0)
 fixed_events = numpy.delete(fixed_events,[344,345],axis=0)
 
+#save fixed eve file
 events_fname = raw_file.replace('_raw.fif','_fixed_eve.fif')
 mne.write_events(events_fname,fixed_events,overwrite=True)
 
-events_check=mne.read_events('/autofs/cluster/transcend/MEG/AttenVis/106201/visit_20210614/106201_AttenVis_run02_fixed_eve.fif')
+#quickest way to compare events with mat files
+fixed_eve_file = find_file('run01_fixed_eve',data_dir)
+events_check=mne.read_events(fixed_eve_file)
+stimuli_list = events_check[:, 2].tolist()
+stimuli_triggers = numpy.array([i for i in stimuli_list if i < 32])
+target_triggers = numpy.array([i for i in stimuli_list if i == 32])
+response_triggers = numpy.array([i for i in stimuli_list if i > 255])
+stim_targets = numpy.array([i for i in stimuli_list if i < 255])
+mat_file   = fixed_eve_file.replace('_fixed_eve.fif','_behaviour.mat')
+mat = scipy.io.loadmat(mat_file)
+mat_triggers = numpy.transpose(mat['triggers'][0])
+
+warning_triggers = numpy.array_equal(mat_triggers,stimuli_triggers)
