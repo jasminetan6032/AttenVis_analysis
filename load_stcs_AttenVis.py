@@ -18,9 +18,9 @@ def find_file(search_string,data_dir):
                 
     return file  
 
-participant = '121201'
+participant = '129301'
 subj_dir='/autofs/space/transcend/MRI/WMA/recons/'
-paradigm = 'AttenVis'
+paradigm = 'Misophonia'
 
 possible_directories = []
 for path, directory_names, filenames in os.walk(subj_dir):
@@ -34,7 +34,7 @@ valid_directories = [i for i in range(0, len(possible_directories)) if len(possi
 local_dir = '/local_mount/space/hypatia/2/users/Jasmine'
 data_dir = os.path.join(local_dir,paradigm,participant) 
 
-load_fname1_lh = find_file('Pop-Outs-lh.stc', data_dir)
+load_fname1_lh = find_file('_Novels-lh.stc', data_dir)
 meg_date = int(os.path.split(load_fname1_lh)[1].split('_')[2])
 
 if len(valid_directories) == 1:
@@ -61,10 +61,11 @@ else:
 # stc_search_rh = mne.read_source_estimate(load_fname2_rh,subject=subjID_date)
 
 stc_popout = mne.read_source_estimate(load_fname1_lh,subject=subjID_date)
+#filtered_stc = stc_popout.savgol_filter(30)
 # stc_search = mne.read_source_estimate(load_fname2_lh,subject=subjID_date)
 
 initial_time = 0.0
-brain = stc_popout.plot(
+brain = stc_popout.savgol_filter(30).plot(
     subjects_dir='/autofs/space/transcend/MRI/WMA/recons/',
     hemi='both',
     initial_time=initial_time,
