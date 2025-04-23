@@ -1,0 +1,1101 @@
+import mne
+import os
+import numpy as np
+import seaborn as sns, matplotlib.pyplot as plt
+import pandas as pd
+from matplotlib.gridspec import GridSpec
+import pprint
+import shutil
+import scipy.stats as st
+from collections import Counter
+from autoreject import get_rejection_threshold, AutoReject
+
+import AttenVis_config as cfg
+
+#plotting parameters
+SMALL_SIZE = 22
+plt.rcParams["font.family"] = "Arial"
+plt.rc('font', size=SMALL_SIZE)
+plt.rc('axes', titlesize=SMALL_SIZE)
+plt.rc('xtick', labelsize=16)
+plt.rc('ytick', labelsize=16)
+plt.rcParams['figure.constrained_layout.use'] = True
+
+def find_files(search_string,data_dir):
+    files = []
+    for path, directory_names, filenames in os.walk(data_dir):
+        for filename in filenames:
+            if search_string in filename:
+                file = os.path.join(path,filename)
+                files.append(file)
+                
+    return files  
+
+def rename_files(participant,original,new_name,copy=False):
+    participant_dir = os.path.join(cfg.data_dir,participant)
+    print(participant_dir)
+    files_to_rename = find_files(original,participant_dir)
+    files_to_rename.sort()
+    if not files_to_rename:
+        print('no files found')
+    else:            
+        for file in files_to_rename:
+            print(file)
+            new_filename = file.replace(original,new_name)
+            print(new_filename)
+            if copy:
+                shutil.copy(file, new_filename)
+            else:
+                os.rename(file,new_filename)
+        check_files = find_files(original,participant_dir)
+        check_files.sort()
+        if check_files:
+            print('Files have been successfully renamed!')
+            pprint.pprint(check_files)
+
+def find_directories(path):
+    """Finds all directories in the given path."""
+
+    directories = []
+    for entry in os.listdir(path):
+        full_path = os.path.join(path, entry)
+        if os.path.isdir(full_path):
+            directories.append(full_path)
+    return directories
+
+def find_mri_recons(subj_dir,sub_id,visit_date):
+    possible_directories = []
+    for path, directory_names, filenames in os.walk(subj_dir):
+        for dir in directory_names:
+            if sub_id + '_' in dir:
+                possible_directories.append(dir)
+                
+    valid_directories = [i for i in range(0, len(possible_directories)) if len(possible_directories[i].split('_')) == 2 and len(possible_directories[i].split('_')[1])==8]
+        
+    meg_date = int(visit_date)
+    
+    if len(valid_directories) == 1:
+        subjID_date = possible_directories[valid_directories[0]]
+    else:
+        date_differences = []
+        for i in range(0, len(valid_directories)):
+            date=int(possible_directories[valid_directories[i]].split('_')[1])
+            date_difference = meg_date-date
+            date_differences.append(abs(date_difference))
+        correct_file = valid_directories[date_differences.index(min(date_differences))]
+        subjID_date = possible_directories[correct_file]
+    return subjID_date
+
+def get_participant_details(participants_df,sub_id):
+    diagnosis = participants_df[participants_df['Participant']==sub_id]["Diagnosis"].values[0]
+    if cfg.paradigm == 'AttenVis':
+        study = 'AttenVis'
+    else:
+        study = participants_df[participants_df['Participant']==sub_id]["Study"].values[0]
+    participant_dir = os.path.join(cfg.local_dir,study,str(sub_id))
+    visit_dir = find_directories(participant_dir)[0]
+    visit_date = os.path.split(visit_dir)[1].split('_')[1]
+    if sub_id == '148501':
+        subjID_date = '148501_20250224'
+    else:
+        subjID_date = find_mri_recons(cfg.subj_dir,sub_id,visit_date)
+    return diagnosis, study,visit_dir,subjID_date
+
+def update_participants(pkl,all_participants):
+    df = pd.read_pickle(pkl)
+    participants_already_in_dataset = np.unique(df['Participant'].values)
+    participants_to_add = [i for i in all_participants if i not in participants_already_in_dataset]
+    return participants_to_add
+
+def load_misonat_participants(study):
+    #load participant list
+    participants = [['td', '114001','MisoNat'],
+                    ['misophonia', '138201','MisoNat'],
+                    ['misophonia', '138701','MisoNat'],
+                    ['td', '140101','MisoNat'],
+                    ['td', '142001','MisoNat'],
+                    ['misophonia', '144601','MisoNat'],
+                    ['misophonia', '145801','MisoNat'],
+                    ['td', '143701','MisoNat'],
+                    ['misophonia','135401','MisoNat2'],
+                    ['misophonia','146201','MisoNat2'],
+                    ['misophonia','147001','MisoNat2'],
+                    ['misophonia','147401','MisoNat2'],
+                    ['misophonia','148201','MisoNat2'],
+                    ['misophonia','148301','MisoNat2'],
+                    ['misophonia','148501','MisoNat2'],
+                    ['misophonia','148901','MisoNat2'],
+                    ['misophonia','149401','MisoNat2'],      
+                    ['td','150801','MisoNat2'],
+                    ['td','150901','MisoNat2'],
+                    ['td','151001','MisoNat2'],
+                    ['td','151101','MisoNat2'],
+                    ['td','999901','MisoNat2']]
+                    # ['td','999902','MisoNat2']]
+    participants_df = pd.DataFrame(participants,columns = ['Diagnosis','Participant','Study'])
+    participants_to_study_exclude = update_participants_n(participants_df,cfg.excluded_participants,study)
+
+    return participants_df, participants_to_study_exclude
+
+def update_participants_n(participants_df,exclude_participants,study):
+    if study == 'all':
+        participants_to_study = participants_df['Participant'].to_list()
+    elif study == 'MisoNat':
+        participants_to_study = participants_df[participants_df['Study']=='MisoNat']['Participant'].to_list() 
+    elif study == 'MisoNat2':
+        participants_to_study = participants_df[participants_df['Study']=='MisoNat2']['Participant'].to_list()
+    elif study == 'miso_only':
+        participants_to_study = participants_df[participants_df['Diagnosis']=='misophonia']['Participant'].to_list()
+    else:
+        participants_to_study = participants_df['Participant'].to_list()
+
+    participants_to_study_exclude = [x for x in participants_to_study if x not in exclude_participants]
+    df_analysed_participants = participants_df[participants_df['Participant'].isin(participants_to_study_exclude)]
+    n_participants = df_analysed_participants.value_counts(['Diagnosis'],sort=False)
+    for diagnosis in cfg.diagnoses:
+        try:
+            cfg.diagnoses[diagnosis].update({'group_n':n_participants[diagnosis]})
+            cfg.diagnoses[diagnosis].update({'label_n': cfg.diagnoses[diagnosis]['label'] + ' (n=' + str(n_participants[diagnosis]) + ')'})
+        except:
+            cfg.diagnoses[diagnosis].update({'group_n':0})
+            cfg.diagnoses[diagnosis].update({'label_n': cfg.diagnoses[diagnosis]['label'] + ' (n=0)'})
+
+    if study == 'all':
+        n_participants = df_analysed_participants.value_counts(['Study','Diagnosis'],sort=False)
+        for diagnosis in cfg.diagnoses:
+            cfg.diagnoses[diagnosis].update({'MisoNat':cfg.diagnoses[diagnosis]['label'] + ' (n=' + str(n_participants['MisoNat'][diagnosis]) + ')'})
+            cfg.diagnoses[diagnosis].update({'MisoNat2': cfg.diagnoses[diagnosis]['label'] + ' (n=' + str(n_participants['MisoNat2'][diagnosis]) + ')'})
+    # elif study == 'miso_only':
+    #     cfg.diagnoses[diagnosis].update({'group_n':n_participants[diagnosis]})
+    #     cfg.diagnoses[diagnosis].update({'label_n': cfg.diagnoses[diagnosis]['label'] + ' (n=' + str(n_participants[diagnosis]) + ')'})
+    return participants_to_study_exclude
+
+def load_participants(participants_csv):
+    """"
+    This function takes the output of analyse_miso_participants, either analysed_participants_demographics.csv or collected_participants_demographics.csv or a manually set up csv for miso_asd_td comparisons.
+
+    """
+    participants_df = pd.read_csv(participants_csv, sep=',')
+    participants_df['Participant'] = participants_df['Participant'].astype('string').str.zfill(6)
+    participants_to_study = list(set(participants_df['Participant']))
+    participants_to_study.sort()
+    df_analysed_participants = participants_df[participants_df['Participant'].isin(participants_to_study)]
+    participants_to_study_exclude = update_participants_n(df_analysed_participants,cfg.excluded_participants,'na')
+
+    return participants_df,participants_to_study_exclude
+
+def get_condition_epochs(epochs,condition):
+    cond_epochs = epochs[condition]
+    reject = get_rejection_threshold(cond_epochs, ch_types=['mag','grad'], decim=2)
+    epochs_clean = cond_epochs.drop_bad(reject=reject)
+    return epochs_clean
+
+def get_evoked(epochs_clean, filter = None, baseline = None):
+    if filter == None:
+        filtered_epochs = epochs_clean
+    else:
+        filtered_epochs = epochs_clean.filter(filter[0],filter[1])
+    if baseline == None:
+        baselined_epochs = filtered_epochs
+    else:
+        baselined_epochs = filtered_epochs.apply_baseline(baseline=baseline)
+    baseline_evoked = baselined_epochs.average()
+    return baseline_evoked
+
+def flip_peaks(time_series):
+    time_series_abs = np.abs(time_series)
+    max_index = np.argmax(time_series_abs)
+    if time_series[max_index] <0:
+        time_series_output = time_series * -1
+    else:
+        time_series_output = time_series
+    return time_series_output
+
+def load_drawn_labels(labels_list,hemi,subjID_date,participant_dir,grown=False):
+    """"
+    Takes a list of drawn labels. If they are to be combined, give the label names in a list. 
+    If you want them in separate labels, run in a loop through. 
+    """
+    labels_to_combine = []
+    for label_name in labels_list:
+        if grown == True:
+            label_name = label_name + '-' + hemi +'.label'#labels grown from seeds follow the mne convention of -lh,-rh
+        else:
+            label_name = label_name + '_' + hemi +'.label'
+        fname_label = find_files(label_name,participant_dir)[0]
+        single_drawn_label = [mne.read_label(fname_label,subject=subjID_date)]
+        labels_to_combine = labels_to_combine.__add__(single_drawn_label)
+    drawn_label = labels_to_combine[0]
+    if len(labels_to_combine) > 1:
+        for i in labels_to_combine[1:]: 
+            drawn_label+=i 
+
+    return drawn_label
+
+def load_annot_labels(labels_list,subjID_date,parc,hemi,subj_dir):
+    """"
+    Takes a list of labels from annotations. If they are to be combined, give the label names in a list. 
+    If you want them in separate labels, run in a loop through. 
+    """
+    aparc_differences = ['G_Ins_lg&S_cent_ins','G_Ins_lg_and_S_cent_ins',
+                        'S_intrapariet&P_trans','S_intrapariet_and_P_trans']
+    
+    def check_other_naming_convention(label_name):
+        if '_and_' in label_name:
+            label_name_v2 = label_name.replace('_and_','&')
+        elif '&' in label_name:
+            label_name_v2 = label_name.replace('&','_and_')
+        
+        return label_name_v2
+
+    labels_to_combine = []
+    for label_name in labels_list:
+        if label_name in aparc_differences:
+            try:
+                next_label = mne.read_labels_from_annot(subjID_date, parc = parc,hemi = hemi, surf_name = 'white', regexp = label_name, subjects_dir=subj_dir)
+            except:
+                other_naming_convention = check_other_naming_convention(label_name)
+                next_label = mne.read_labels_from_annot(subjID_date, parc = parc,hemi = hemi, surf_name = 'white', regexp = other_naming_convention, subjects_dir=subj_dir)
+        else:
+            next_label = mne.read_labels_from_annot(subjID_date, parc = parc,hemi = hemi, surf_name = 'white', regexp = label_name, subjects_dir=subj_dir)
+
+        labels_to_combine = labels_to_combine.__add__(next_label)
+    annot_label = labels_to_combine[0]
+    if len(labels_to_combine) > 1:
+        for i in labels_to_combine[1:]: 
+            annot_label+=i 
+    return annot_label
+
+def morph_fslabel(label,subjID_date,hemi):
+    label_name = label + '-' + hemi + '.label'
+    fname_label = find_files(label_name,cfg.data_dir)[0]
+    drawn_label = [mne.read_label(fname_label,subject='fsaverage')]
+    morphed_label= mne.morph_labels(drawn_label, subject_to=subjID_date, subject_from='fsaverage', subjects_dir=cfg.subj_dir, surf_name='inflated')
+    brain = mne.viz.Brain(subject = subjID_date,hemi = hemi ,views = cfg.brain_view,subjects_dir = cfg.subj_dir,surf='inflated',background='white',show = True)
+    brain.add_label(morphed_label[0], hemi = hemi, alpha=0.75)
+    brain_fig_name = 'brain.tiff'
+    brain_image_name = os.path.join(cfg.output_dir,brain_fig_name)
+    brain.save_image(filename=brain_image_name, mode='rgb')
+    fig = plt.figure(figsize=(6,6), layout='constrained')
+    gs  = GridSpec(1, 1, figure=fig) 
+    ax1 = fig.add_subplot(gs[0,0])
+    ax1.imshow(plt.imread(brain_image_name))
+    ax1.axis('off')
+    report  = mne.Report(title=cfg.morph_report_savename) if not os.path.exists(os.path.join(cfg.savedir,cfg.morph_report_savename_hdf5)) else mne.open_report(os.path.join(cfg.savedir,cfg.morph_report_savename_hdf5))
+    report.add_figure(fig = fig,title = hemi, section = subjID_date)
+    report.save(os.path.join(cfg.savedir,cfg.morph_report_savename_hdf5),verbose=False,overwrite=True)
+
+    brain.close()
+
+    return morphed_label
+
+def show_report(report,report_name):
+    """
+    Show html repot for paradigm
+    """
+    print('\n>>> TranscendTLBX: Creating .html report\n')
+    if os.path.exists(report_name):
+        report  = mne.open_report(report_name)
+    else:
+        raise TypeError('ERROR: No report found in paradgm directory')
+    report.save(os.path.join(report_name.replace('.hdf5','.html')),verbose=False,overwrite=True)    
+
+def find_peak_grow_label(stc,hemi,tmin,tmax,label_size,subjID_date,peak_type,file_location):
+    peak_vertex,peak_time = stc.get_peak(hemi = hemi, tmin = tmin,tmax = tmax)
+    if hemi == 'lh':
+        hemis = 0
+    elif hemi == 'rh':
+        hemis = 1
+    if peak_type == 'coh':
+        annot_label = mne.grow_labels(subjID_date,peak_vertex,label_size,hemis,subjects_dir = cfg.subj_dir,names=[cfg.labels_of_interest[0] + '_coh_' + hemi + '_grown'])[0]
+    else:
+        annot_label = mne.grow_labels(subjID_date,peak_vertex,label_size,hemis,subjects_dir = cfg.subj_dir,names=[cfg.labels_of_interest[0] + '_grown'])[0]
+    label_fname = os.path.join(file_location,'_'.join([subjID_date.split('_')[0],annot_label.name + '.label']))
+    mne.write_label(label_fname,annot_label)
+    morphed_label= mne.morph_labels([annot_label], subject_to='fsaverage', subject_from=subjID_date, subjects_dir=cfg.subj_dir, surf_name='inflated')
+    
+    return annot_label,morphed_label,label_fname,peak_time
+
+def plot_time_frequency(times,freqs,condition,output_dir,miso,td,title1,title2,hemi=None):
+    SMALL_SIZE = 22
+    plt.rcParams["font.family"] = "Arial"
+    plt.rc('font', size=SMALL_SIZE)
+    plt.rc('axes', titlesize=SMALL_SIZE)
+    plt.rcParams['figure.constrained_layout.use'] = True
+
+    x_lims = [cfg.tmin_plot,cfg.tmax_plot]
+    levels = np.linspace(-0.2,0.2,80)
+    fig = plt.figure(layout=None, figsize=[12.8,  4.8])
+    gs = fig.add_gridspec(nrows=2, ncols=6)
+    ax0 = fig.add_subplot(gs[0:2, 0:3])
+    ax0.contourf(times,freqs,miso, levels=levels, extend='both')
+    ax0.set_xlim(x_lims)
+    ax0.set_ylabel('Frequency (Hz)')
+    ax0.set_title(title1)
+
+    ax2 = fig.add_subplot(gs[0:2, 3:])
+    cbh = ax2.contourf(times,freqs,td, levels=levels, extend='both')
+    ax2.set_xlim(x_lims)
+    # ax2.set_xticklabels('')
+    ax2.set_yticklabels('')
+    ax2.set_title(title2)
+    plt.colorbar(cbh, label='Power (dB)', ticks=np.linspace(-0.2,0.2,5))
+    fig.supxlabel('Time (s)',fontsize = 22)
+    if condition == 'miso':
+        title = 'Evoked response to Trigger Sounds' 
+    elif condition == 'sound2':
+        title = 'Evoked response to Neutral Sounds' 
+    elif condition == 'white_noise':
+        title = 'Evoked response to white noise' 
+    elif condition == 'amp_mod':
+        title = 'Evoked response to amplitude modulated white noise' 
+
+    if hemi:
+        fig.suptitle(title + ' (' + hemi.upper() + ')',fontsize = 22)
+    else:
+        fig.suptitle(title,fontsize = 22)
+
+    #save fig
+    fig_to_save = fig.get_figure()
+    if hemi == None:
+        savetitle = '_'.join([condition,'power','plot'])
+    else:
+        savetitle = '_'.join([hemi, condition,'power','plot'])
+    savename = os.path.join(output_dir, savetitle + ".tiff")
+    fig_to_save.savefig(savename,dpi=300)
+    plt.close()
+    return fig, savename
+    
+
+def plot_time_frequency_three(times,freqs,condition,output_dir,miso,asd,td,title1,title2,title3,hemi=None):
+    SMALL_SIZE = 22
+    plt.rcParams["font.family"] = "Arial"
+    plt.rc('font', size=SMALL_SIZE)
+    plt.rc('axes', titlesize=SMALL_SIZE)
+    plt.rcParams['figure.constrained_layout.use'] = True
+    y_lims = [2,6]
+    x_lims = [-0.5,3]
+    levels = np.linspace(-0.2,0.2,80)
+    fig = plt.figure(layout=None, figsize=[12.8,  4.8])
+    gs = fig.add_gridspec(nrows=3, ncols=9)
+    ax0 = fig.add_subplot(gs[0:2, 0:3])
+    ax0.contourf(times,freqs,miso, levels=levels, extend='both')
+    ax0.set_xlim(x_lims)
+    ax0.set_ylabel('Frequency (Hz)')
+    ax0.set_title(title1)
+    
+    ax3 = fig.add_subplot(gs[2, 0:3])
+    ax3.plot(times,np.mean(miso[(freqs >= 8) & (freqs <= 12),:], axis=0))
+    ax3.set_xlim(x_lims)
+    ax3.set_xticklabels(np.arange(0,6))
+    ax3.set_ylim(y_lims)
+    ax3.set_xlabel('Time (s)')
+    ax3.set_ylabel("α power")
+
+    ax1 = fig.add_subplot(gs[2, 3:6])
+    ax1.contourf(times,freqs,asd, levels=levels, extend='both')
+    ax1.set_xlim(x_lims)
+    ax1.set_ylabel('Frequency (Hz)')
+    ax1.set_title(title2)
+    ax4 = fig.add_subplot(gs[2, 3:6])
+    ax4.plot(times,np.mean(asd[(freqs >= 8) & (freqs <= 12),:], axis=0))
+    ax4.set_xlim(x_lims)
+    ax4.set_xticklabels(np.arange(0,6))
+    ax4.set_ylim(y_lims)
+    ax4.set_xlabel('Time (s)')
+    ax4.set_ylabel("α power")
+
+
+    ax2 = fig.add_subplot(gs[0:2, 6:9])
+    cbh = ax2.contourf(times,freqs,td, levels=levels, extend='both')
+    ax2.set_xlim(x_lims)
+    # ax2.set_xticklabels('')
+    ax2.set_yticklabels('')
+    ax2.set_title(title3)
+    plt.colorbar(cbh, label='Power (dB)', ticks=np.linspace(-0.2,0.2,5))
+
+    ax5 = fig.add_subplot(gs[2, 6:9])
+    ax5.plot(times,np.mean(td[(freqs >= 8) & (freqs <= 12),:], axis=0))
+    ax5.set_xlim(x_lims)
+    ax5.set_xticklabels(np.arange(0,6))
+    ax5.set_ylim(y_lims)
+    ax5.set_xlabel('Time (s)')
+    ax5.set_ylabel("α power")
+
+    fig.supxlabel('Time (s)',fontsize = 22)
+    if condition == 'miso':
+        title = 'Evoked response to misophonic trigger' 
+    elif condition == 'sound2':
+        title = 'Evoked response to neutral sound' 
+    elif condition == 'white_noise':
+        title = 'Evoked response to white noise' 
+    elif condition == 'amp_mod':
+        title = 'Evoked response to amplitude modulated white noise' 
+    elif condition == 'distractors':
+        title = 'Evoked response to novel distractors' 
+
+    if hemi:
+        fig.suptitle(title + ' (' + hemi.upper() + ')',fontsize = 22)
+    else:
+        fig.suptitle(title,fontsize = 22)
+
+    #save fig
+    fig_to_save = fig.get_figure()
+    if hemi == None:
+        savetitle = '_'.join([condition,'power','plot'])
+    else:
+        savetitle = '_'.join([hemi, condition,'power','plot'])
+    savename = os.path.join(output_dir, savetitle + ".tiff")
+    fig_to_save.savefig(savename,dpi=300)
+    plt.close()
+    return fig, savename
+    
+def plot_pac(low_fq_range,high_fq_range,condition,output_dir,miso,td,title1,title2,hemi=None):
+    SMALL_SIZE = 22
+    plt.rcParams["font.family"] = "Arial"
+    plt.rc('font', size=SMALL_SIZE)
+    plt.rc('axes', titlesize=SMALL_SIZE)
+    plt.rcParams['figure.constrained_layout.use'] = True
+
+    levels = np.linspace(0,0.025,15)
+    fig,ax = plt.subplots(1,2, figsize=[10.18,  5.05])
+
+    ax[0].contourf(low_fq_range,high_fq_range,miso.T, levels=levels , extend='both')
+    ax[0].set_ylabel('Frequency (Hz)')
+    ax[0].set_xlabel('Driver Frequency (Hz)')
+    ax[0].set_title(title1)
+    cbh = ax[1].contourf(low_fq_range,high_fq_range,td.T, levels=levels, extend='both' )
+    ax[1].set_yticklabels('')
+    ax[1].set_xlabel('Driver Frequency (Hz)')
+    ax[1].set_title(title2)
+    plt.colorbar(cbh, label='PAC', ticks=np.linspace(0,0.025,7))
+
+    if condition == 'miso':
+        title = 'Evoked response to misophonic trigger'
+    elif condition == 'sound2':
+        title = 'Evoked response to neutral sound'
+    elif condition == 'white_noise':
+        title = 'Evoked response to white noise'
+    elif condition == 'amp_mod':
+        title = 'Evoked response to amplitude modulated white noise'
+    fig.suptitle(title,fontsize = 22)
+
+    #save fig
+    fig_to_save = fig.get_figure()
+    if hemi == None:
+        savetitle = '_'.join([condition,'pac','plot'])
+    else:
+        savetitle = '_'.join([hemi, condition,'pac','plot'])
+    savename = os.path.join(output_dir, savetitle + ".tiff")
+    fig_to_save.savefig(savename,dpi=300)
+    plt.close()
+    return fig, savename
+        
+def add_tfrs_to_report(df,report,id,title1,title2):
+    times = df["time"].values[0]
+    freqs = np.arange(cfg.freq_min,cfg.freq_max,1)
+    for condition in cfg.brain_selected_conditions:
+        image_names = []
+        for hemi in cfg.hemisphere:
+            df_hemi = df[df["hemisphere"]==hemi]
+            #plot non-normalised power
+            df_to_plot = df_hemi[(df_hemi['Diagnosis'] == 'asd') & (df_hemi['Condition']==condition)]
+            miso_data = df_to_plot['power'].values.mean()
+
+            df_to_plot = df_hemi[(df_hemi['Diagnosis'] == 'td') & (df_hemi['Condition']==condition)]
+            td_data = df_to_plot['power'].values.mean()
+
+            fig1, name = plot_time_frequency(times,freqs,condition,cfg.output_dir,miso_data,td_data,title1,title2, hemi=hemi)
+            #save fig
+            fig_to_save = fig1.get_figure()
+            fig_to_save.savefig(name.replace('.tiff','.svg'),format="svg")
+            fig_to_save.savefig(name,dpi=300)
+            image_names.append(name)
+            plt.close()
+        fig = plt.figure(figsize=(18,6), layout='constrained')
+        gs  = GridSpec(1, 2, figure=fig) 
+        ax1 = fig.add_subplot(gs[0,0])
+        ax2 = fig.add_subplot(gs[0,1])
+        ax1.imshow(plt.imread(image_names[0]))
+        ax1.axis('off')
+        ax2.imshow(plt.imread(image_names[1]))
+        ax2.axis('off')
+        title = '_'.join([id,condition,'power'])
+        
+        report.add_figure(fig=fig, title=title, section=id, tags=[condition,'power'],replace=True)
+        plt.close('all')
+
+def add_tfrs_to_report_three(df,report,id,title1,title2,title3):
+    times = df["time"].values[0]
+    freqs = np.arange(cfg.freq_min,cfg.freq_max,1)
+    for condition in cfg.condition:
+        for hemi in cfg.hemisphere:
+            df_hemi = df[df["hemisphere"]==hemi]
+            #plot non-normalised power
+            df_to_plot = df_hemi[(df_hemi['Diagnosis'] == 'miso') & (df_hemi['Condition']==condition)]
+            miso_data = df_to_plot['power'].values.mean()
+
+            df_to_plot = df_hemi[(df_hemi['Diagnosis'] == 'asd') & (df_hemi['Condition']==condition)]
+            asd_data = df_to_plot['power'].values.mean()
+
+            df_to_plot = df_hemi[(df_hemi['Diagnosis'] == 'td') & (df_hemi['Condition']==condition)]
+            td_data = df_to_plot['power'].values.mean()
+
+            fig1, name = plot_time_frequency_three(times,freqs,condition,cfg.output_dir,miso_data,asd_data,td_data,title1,title2, title3, hemi=hemi)
+            title = '_'.join([id,hemi,condition,'power'])
+            report.add_figure(fig=fig1, title=title, section=id, tags=[hemi,condition,'power'],replace=True)
+            plt.close('all')
+
+def add_participant_tfrs_to_report(df,report,id):
+    times = df["time"].values[0]
+    freqs = np.arange(cfg.freq_min,cfg.freq_max,1)
+    for condition in cfg.condition:
+        #plot non-normalised power
+        df_to_plot = df[(df['hemisphere'] == 'lh') & (df['Condition']==condition)]
+        lh_data = df_to_plot['power'].values.mean()
+
+        df_to_plot = df[(df['hemisphere'] == 'rh') & (df['Condition']==condition)]
+        rh_data = df_to_plot['power'].values.mean()
+
+        fig1, name = plot_time_frequency(times,freqs,condition,cfg.output_dir,lh_data,rh_data,title1='lh',title2='rh')
+        title = '_'.join([id,condition,'power'])
+        report.add_figure(fig=fig1, title=title, section=id, tags=[condition,'power'],replace=True)
+        plt.close('all')
+
+def add_participant_pacs_to_report(df,report,id):
+    low_fq_range = df["low_freqs"].values[0]
+    high_fq_range = df["high_freqs"].values[0]
+    for condition in cfg.condition:
+        #plot non-normalised power
+        df_to_plot = df[(df['hemisphere'] == 'lh') & (df['Condition']==condition)]
+        miso_data = df_to_plot['pac'].values.mean()
+
+        df_to_plot = df[(df['hemisphere'] == 'rh') & (df['Condition']==condition)]
+        td_data = df_to_plot['pac'].values.mean()
+
+        fig1, name = plot_pac(low_fq_range,high_fq_range,condition,cfg.output_dir,miso_data,td_data,title1='lh',title2='rh')
+        title = '_'.join([id,condition,'pac'])
+        report.add_figure(fig=fig1, title=title, section=id, tags=[condition,'pac'],replace=True)
+        plt.close('all')
+
+def add_pacs_to_report(df,report,id,title1,title2):
+    low_fq_range = df["low_freqs"].values[0]
+    high_fq_range = df["high_freqs"].values[0]
+    for condition in cfg.condition:
+        for hemi in cfg.hemisphere:
+            df_hemi = df[df["hemisphere"]==hemi]
+            #plot non-normalised power
+            df_to_plot = df_hemi[(df_hemi['Diagnosis'] == 'miso') & (df_hemi['Condition']==condition)]
+            miso_data = df_to_plot['pac'].values.mean()
+
+            df_to_plot = df_hemi[(df_hemi['Diagnosis'] == 'td') & (df_hemi['Condition']==condition)]
+            td_data = df_to_plot['pac'].values.mean()
+
+            fig1, name = plot_pac(low_fq_range,high_fq_range,condition,cfg.output_dir,miso_data,td_data,title1,title2)
+            title = '_'.join([id,condition,'pac'])
+            report.add_figure(fig=fig1, title=title, section=id, tags=[condition,'pac'],replace=True)
+            plt.close('all')
+
+def plot_participant_labels_on_fsaverage(df,hemi):
+    brain = mne.viz.Brain(subject = 'fsaverage',hemi = hemi ,views = cfg.brain_view,subjects_dir = cfg.fsaverageDir,surf='inflated',background='white')
+    if cfg.analysis_type == 'connectivity':
+        df_hemi = df[df["target_hemi"]==hemi]
+    else:
+        df_hemi = df[df["hemisphere"]==hemi]
+
+    drawn_labels = df_hemi["morphed_label"].dropna().values
+    for info in drawn_labels:
+        if info:
+            brain.add_label(info[0], hemi = hemi, alpha=0.75)
+    return brain
+def plot_participant_labels_on_brain(subjID_date,hemi):
+    brain = mne.viz.Brain(subject = subjID_date,hemi = hemi ,views = cfg.brain_view,subjects_dir = cfg.subj_dir,surf='inflated',background='white')
+    brain.add_label(cfg.peak_labels_hemis[hemi], hemi = hemi, alpha=0.75)
+    return brain
+
+def add_fsaverage_to_report(report,df,label_name,seed_hemi=None):
+    fig = plt.figure(figsize=(12,6), layout='constrained')
+    gs  = GridSpec(1, 2, figure=fig) 
+    ax1 = fig.add_subplot(gs[0,0])
+    ax2 = fig.add_subplot(gs[0,1])
+    brain1 = plot_participant_labels_on_fsaverage(df,'lh')
+    brain_fig_name = 'lh_brain.tiff'
+    brain_image_name = os.path.join(cfg.output_dir,brain_fig_name)
+    brain1.save_image(filename=brain_image_name, mode='rgb')
+    ax1.imshow(plt.imread(brain_image_name))
+    ax1.set_title('Labels in left hemisphere')
+    ax1.axis('off')
+    brain2 = plot_participant_labels_on_fsaverage(df,'rh')
+    brain_fig_name = 'rh_brain.tiff'
+    brain_image_name = os.path.join(cfg.output_dir,brain_fig_name)
+    brain2.save_image(filename=brain_image_name, mode='rgb')
+    ax2.imshow(plt.imread(brain_image_name))
+    ax2.set_title('Labels in right hemisphere')
+    ax2.axis('off')
+
+    #save fig
+    fig_to_save = fig.get_figure()
+    title_filtered = [x for x in [label_name,seed_hemi] if x is not None]
+    savetitle = '_'.join(title_filtered)
+    savename = os.path.join(cfg.output_dir, savetitle + ".tiff")
+    fig_to_save.savefig(savename,dpi=300)
+    plt.close()
+    report.add_figure(fig=fig, title=savetitle, section='gavg', tags=label_name,replace=True)
+
+
+def plot_stc(stc,hemi,initial_time,annot_label,condition,label_color,other_hemi=None):
+    brain = stc.plot(
+    subjects_dir='/autofs/space/transcend/MRI/WMA/recons/',
+    hemi=hemi,
+    initial_time=initial_time,
+    clim=dict(kind="percent", lims=[99.5, 99.7, 99.9]),
+    smoothing_steps=7,
+    views = cfg.brain_view,
+    time_viewer = False
+    )
+    brain.add_label(annot_label, hemi = hemi, alpha=0.75,color = label_color)
+    brain.add_text(0.1, 0.9, condition, "title", font_size=16)
+    if other_hemi is None:
+        other_hemi = hemi
+    brain_image_name = os.path.join(cfg.output_dir,'_'.join([condition,hemi, other_hemi, "brain.tiff"]))
+    brain.save_image(filename=brain_image_name, mode='rgb')
+    brain.close()
+
+    return brain_image_name
+
+def find_nearest(array, value):
+    array = np.asarray(array)
+    idx = (np.abs(array - value)).argmin()
+    return idx
+
+def plot_line(df,variable,ax,label,color,freqs = None,ci=False,group=False):
+    time = df['time'].values[0]
+    time_to_plot = [find_nearest(time,cfg.tmin_plot),find_nearest(time,cfg.tmax_plot)]
+    time_for_plot = time[time_to_plot[0]:time_to_plot[1]]
+    if freqs is not None:
+        freq_to_plot = [np.where(np.arange(cfg.freq_min,cfg.freq_max,1)==freqs[0])[0][0],np.where(np.arange(cfg.freq_min,cfg.freq_max,1)==freqs[1])[0][0]]
+
+    if not group:
+        data_to_plot = df[variable].mean().squeeze()
+        if freqs is not None:
+            data = np.mean(data_to_plot[freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]],axis=0)
+        else:  
+            data = data_to_plot[time_to_plot[0]:time_to_plot[1]]
+        ax.plot(time_for_plot,data, color=color, label=label)
+
+    else:
+        data_to_plot = np.stack(df[variable].values).squeeze()
+        if freqs is not None:
+            data = np.mean(data_to_plot[:,freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]],axis=1)
+        else: 
+            data = data_to_plot[:,time_to_plot[0]:time_to_plot[1]]
+        ax.plot(time_for_plot,np.mean(data,axis=0), color=color, label=label)
+
+    if ci:
+        cis = st.norm.interval(confidence=cfg.confidence,
+                            loc=np.mean(data, axis=0),
+                            scale=st.sem(data, axis=0))
+        ax.fill_between(time_for_plot, cis[0], cis[1], color=color, alpha=.1)
+
+    return ax
+
+def plot_activations(df,plot_title,tag,factor,factor_name_in_df,group=False,ci=False):
+    #plot activations in time window
+    SMALL_SIZE = 22
+    plt.rcParams["font.family"] = "Arial"
+    plt.rc('font', size=SMALL_SIZE)
+    plt.rc('axes', titlesize=SMALL_SIZE)
+
+    sub_fig,sub_ax1 = plt.subplots(figsize=(6.4,4.8), layout='constrained')
+    for level in factor:       
+        df_to_plot = df[(df[factor_name_in_df]==level)]
+        sub_ax1 = plot_line(df_to_plot,'stc',sub_ax1,level,cfg.color_dict[level],ci=ci,group=group)
+    sub_ax1.legend(fontsize = 16)
+    if group:
+        sub_ax1.set_ylim(cfg.ylims)
+    sub_ax1.set_xlabel('Time (s)',fontsize=cfg.fontsize)
+    sub_ax1.set_ylabel('dSPM activation (AU)',fontsize=cfg.fontsize)
+    sub_ax1.axvline(x=0, ls='--', color='k')
+
+    title = plot_title + tag + ' \n '
+    sub_ax1.set_title(title,fontsize=16)
+    
+    savetitle = 'activations_plot' + tag
+    savename = os.path.join(cfg.output_dir, savetitle + ".tiff")
+    sub_fig.savefig(savename,dpi=300)
+        
+    return sub_fig,savename
+
+def add_participant_activations_to_report(df,report,id):
+    diagnosis = df["Diagnosis"].values[0]
+    for hemi in cfg.hemisphere:
+        df_hemi = df[df["hemisphere"]==hemi]
+        hemi_tag = ' (' + hemi.upper() + ')'
+        #plot time series activations   
+        fig1,filename= plot_activations(df_hemi,'Activations from ',df['Participant'].values[0] + hemi_tag,cfg.plot_selected_conditions,'Condition', group=False)
+        fig = plt.figure(figsize=(24,6), layout='constrained')
+        gs  = GridSpec(1, 4, figure=fig) 
+        ax1 = fig.add_subplot(gs[0,0])
+        ax2 = fig.add_subplot(gs[0,1])
+        ax3 = fig.add_subplot(gs[0,2])
+        ax4 = fig.add_subplot(gs[0,3])
+        brain1_image_name = os.path.join(cfg.output_dir,'_'.join([list(cfg.condition.keys())[0],hemi,hemi, "brain.tiff"]))
+        ax1.imshow(plt.imread(brain1_image_name))
+        ax1.axis('off')
+        brain2_image_name = os.path.join(cfg.output_dir,'_'.join([list(cfg.brain_selected_conditions)[0],hemi,hemi, "brain.tiff"]))
+        ax2.imshow(plt.imread(brain2_image_name))
+        ax2.axis('off')
+        brain3_image_name = os.path.join(cfg.output_dir,'_'.join([list(cfg.brain_selected_conditions)[1],hemi,hemi, "brain.tiff"]))
+        ax3.imshow(plt.imread(brain3_image_name))
+        ax3.axis('off')
+        ax4.imshow(plt.imread(filename))
+        ax4.axis('off')
+        title = '_'.join([id,hemi,'activations'])
+        report.add_figure(fig=fig, title=title, section=id, tags=[hemi,'activations',diagnosis],replace=True)
+        plt.close('all')
+
+def add_gavg_activations_to_report(df,report,id,grouping_factor,factor_name_in_df):
+    for factor_level in grouping_factor:
+        filenames_hemis = {}
+        for hemi in cfg.hemisphere:
+            hemi_tag = ' (' + hemi.upper() + ')'
+            df_to_plot = df[(df[factor_name_in_df] == factor_level) & (df['hemisphere'] == hemi)]
+            fig1,filename= plot_activations(df_to_plot,'Activations from ',factor_level + hemi_tag,cfg.plot_selected_conditions,'Condition',group=True,ci = True)
+            filenames_hemis.update({hemi:filename})
+        fig = plt.figure(figsize=(18,6), layout='constrained')
+        gs  = GridSpec(1, 2, figure=fig) 
+        ax1 = fig.add_subplot(gs[0,0])
+        ax2 = fig.add_subplot(gs[0,1])
+        image_name1 = filenames_hemis['lh']
+        ax1.imshow(plt.imread(image_name1))
+        ax1.axis('off')
+        image_name2 = filenames_hemis['rh']
+        ax2.imshow(plt.imread(image_name2))
+        ax2.axis('off')
+        title = '_'.join([id,factor_level,'activations'])
+
+        report.add_figure(fig=fig, title=title, section='_'.join([id,factor_level]), tags=[hemi,'activations'],replace=True)
+        plt.close('all')
+
+def find_strongest_sensor(sensor_data,filt):
+    strongest_sensors = {'mag':{},
+                         'grad':{}}
+    filt_sensors = sensor_data.filter(1,filt)
+    for ch_type in [*strongest_sensors]:
+        for hemi in cfg.sensor_hemis:
+            epochs_data = filt_sensors[hemi]
+            max_values = []
+            for ep_i in range(0,len(epochs_data)):
+                    evoked = epochs_data[ep_i].average()
+                    ch, lat, amp = evoked.get_peak(
+                        ch_type=ch_type, tmin=-0.5, tmax=0, mode="abs", return_amplitude=True
+                        )
+                    max_values.append([ch,amp])
+            chs = list(list(zip(*max_values))[0])
+            data = Counter(chs)
+            strongest_sensor_in_hemisphere = data.most_common(1)[0][0]
+            strongest_sensors[ch_type].update({hemi:strongest_sensor_in_hemisphere})
+
+    return strongest_sensors
+
+def erpimage_by_peak_latency(epochs,sensor):
+    max_values_lat=[]
+    for i in range(0,len(epochs)):
+        evoked = epochs[i].pick(sensor).average()
+        ch, lat, amp = evoked.get_peak(
+            ch_type=None, tmin=-0.5, tmax=0, mode="abs", return_amplitude=True
+            )
+    max_values_lat.append(lat)
+    order = np.argsort(max_values_lat,axis=0)
+    epochs.plot_image(picks=[sensor],order=order)
+
+def get_tri_from_SFive(csvfile,subject):
+    """
+    Get diagnosis from the Misophonia report (ID:140542) from RedCap. Columns have been specified to this report.
+
+    Parameters
+    ----------
+    subject : str
+        subject ID
+    """
+
+    # diagnosis
+    subject = int(subject)
+    self_report_diagnosis = []
+    trigger_relative_intensity = csvfile["Trigger Relative Intensity"][csvfile['Subject ID:'] == subject].dropna()
+    diagnosis = []
+    for i in list(csvfile.columns[4:6]):
+        this_val = csvfile[i][csvfile['Subject ID:'] == subject].dropna()
+        if not this_val.empty:
+            diagnosis.append(this_val.values)
+    if not diagnosis:
+        self_report_diagnosis = np.nan
+    else:
+        self_report_diagnosis = 'misophonia' if 'Yes' in diagnosis else 'td'
+
+    if not trigger_relative_intensity.empty: 
+
+        trigger_relative_intensity = csvfile["Trigger Relative Intensity"][csvfile['Subject ID:'] == subject].dropna().values[0]
+        triggers_greater_than_0 = csvfile["Number of triggers greater than 0"][csvfile['Subject ID:'] == subject].dropna().values[0]
+        triggers_greater_than_8 = csvfile["Number of triggers greater than or equal to 8"][csvfile['Subject ID:'] == subject].dropna().values[0]
+        if trigger_relative_intensity > 6 or (trigger_relative_intensity < 6 and triggers_greater_than_0 > 25 and triggers_greater_than_8 >=5):
+            sfive_diagnosis = 'misophonia'
+        else:
+            sfive_diagnosis = 'td'
+    else:
+        sfive_diagnosis = np.nan
+        trigger_relative_intensity  = np.nan
+
+    return self_report_diagnosis,sfive_diagnosis,trigger_relative_intensity
+
+def get_average_freq_power(power,times,freqs,time_window):
+    freq_range = np.arange(cfg.freq_min,cfg.freq_max,1)
+    freqs2plot = (freq_range >= freqs[0]) & (freq_range <= freqs[1])
+    times2plot = (times >= time_window[0]) & (times <= time_window[1])
+    tw_of_interest = np.mean(power[:, times2plot],axis=1)
+    freq_of_interest = np.mean(tw_of_interest[freqs2plot])
+
+def get_coh_stc(df,plot_type):
+    con_res = df['connectivity_data'].values[0]
+    con_res_times = df['time'].values[0]
+    con_res_vertices = df['vertices'].values[0]
+    con_subjID_date = df['SubjID_Date'].values[0]
+    cwt_freqs = np.arange(cfg.freq_min, cfg.freq_max+1, 1)
+
+    if plot_type == 'time':
+        tmin  = con_res_times[0] 
+        tstep = con_res_times[1] - tmin
+        coh_to_plot = np.mean(con_res[:,(cwt_freqs >= 10) & (cwt_freqs <= 13),:], axis=1) #(cwt_freqs >= 10) & (cwt_freqs <= 13)
+    elif plot_type == 'freq':
+        tmin  = np.mean(cwt_freqs[0])
+        tstep = np.mean(cwt_freqs[1]) - tmin
+        times2plot = (np.array(con_res_times) >= 0.5) & (np.array(con_res_times) <= 1.0)
+        coh_to_plot = np.mean(con_res[:,:,times2plot], axis=2)
+    coh_stc = mne.SourceEstimate(
+        coh_to_plot,
+        vertices=con_res_vertices,
+        tmin=tmin,
+        tstep=tstep,
+        subject=con_subjID_date
+    )
+    
+    return coh_stc, con_subjID_date
+        
+
+def plot_coh_conditions(ax,df,tag,factor,factor_name_in_df,ylims,ci=False,group=False,plot_title=None,highlight_area=False,area_time_window=None,zcoh=False):
+
+    for level in factor:       
+        df_to_plot = df[(df[factor_name_in_df]==level)]
+        ax = plot_line(df_to_plot,'stc',ax,cfg.plot_labels[level]['label'],cfg.color_dict[level],ci=ci,group=group)
+    ax.legend(fontsize = 16)
+    ax.set_ylim(ylims)
+    ax.set_xlim(left=0)
+    ax.set_xlabel('Time (s)',fontsize=cfg.fontsize)
+    if zcoh:
+        ax.set_ylabel('Coherence (z)',fontsize=cfg.fontsize)
+    else:
+        ax.set_ylabel('Coherence',fontsize=cfg.fontsize)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    # ax.axvline(x=0, ls='--', color='k')
+    if highlight_area:
+        ax.axvline(x=area_time_window[0], ls='--', color='k')
+        ax.axvline(x=area_time_window[1], ls='--', color='k')
+    if plot_title:
+        title = plot_title + tag + ' \n '
+        ax.set_title(title,fontsize=16)
+
+    return ax
+
+def plot_power_over_time(ax,df,tag,factor_name_in_df,freqs,group=False,highlight_area=False,area_time_window=None,plot_title=None,ylims=None,ci=False):
+    for level in cfg.df_varnames[factor_name_in_df]:       
+        df_to_plot = df[(df[factor_name_in_df]==level)]
+        ax = plot_line(df_to_plot,'power',ax,cfg.plot_labels[level]['label'],cfg.color_dict[level],freqs=freqs,ci=True,group=group)
+        ax.legend(fontsize = 16)
+    ax.set_ylim(ylims)
+    # ax.set_xlim(left=0)
+    ax.set_xlabel('Time (s)',fontsize=cfg.fontsize)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.axvline(x=0, ls='--', color='k')
+    if highlight_area:
+        ax.axvline(x=area_time_window[0], ls='--', color='k')
+        ax.axvline(x=area_time_window[1], ls='--', color='k')
+    if plot_title:
+        title = plot_title + tag + ' \n '
+        ax.set_title(title,fontsize=16)
+
+    return ax
+
+def add_gavg_power_over_time_to_report(df,report,id,factor_name_in_df,freqs,ci=False):
+
+    plot_title = 'Alpha power in '
+    ylims = (-0.4,0.4)
+    report_tag = 'alpha_power'
+    grouping_factor = cfg.df_varnames[factor_name_in_df]
+    for factor_level in grouping_factor:
+        fig = plt.figure(figsize=(12,6), layout='constrained')
+        gs  = GridSpec(1, 2, figure=fig) 
+        ax1 = fig.add_subplot(gs[0,0])
+        ax2 = fig.add_subplot(gs[0,1])
+        hemi_axes={'lh':ax1,
+                    'rh':ax2}
+        for hemi in cfg.hemisphere:
+            hemi_tag = ' (' + hemi.upper() + ')'
+            df_to_plot = df[(df[factor_name_in_df] == factor_level) & (df['hemisphere'] == hemi)]
+            if factor_name_in_df == 'Condition':
+                plot_power_over_time(hemi_axes[hemi],df_to_plot,factor_level + hemi_tag,'Diagnosis',freqs, ylims=ylims,group=True,plot_title=plot_title,ci=ci)
+            elif factor_name_in_df == 'Diagnosis':
+                plot_power_over_time(hemi_axes[hemi],df_to_plot,factor_level + hemi_tag,'Condition',freqs, ylims=ylims,group=True,plot_title=plot_title, ci=ci)
+
+        title = '_'.join([id,factor_level,report_tag])
+
+        report.add_figure(fig=fig, title=title, section='_'.join([id,factor_level]), tags=[hemi,report_tag],replace=True)
+        plt.close('all')
+
+def add_participant_coh_to_report(df,report,id):
+    diagnosis = df["Diagnosis"].values[0]
+    for hemi in cfg.hemisphere:
+        hemi_tag = ' (' + hemi.upper() + ')'
+        #plot time series activations   
+        fig = plt.figure(figsize=(18,6), layout='constrained')
+        gs  = GridSpec(1, 4, figure=fig) 
+        ax1 = fig.add_subplot(gs[0,0])
+        ax2 = fig.add_subplot(gs[0,1])
+        ax3 = fig.add_subplot(gs[0,2])
+        ax4 = fig.add_subplot(gs[0,3])
+        brain1_image_name = os.path.join(cfg.output_dir,'_'.join([cfg.selected_conditions[0],hemi,hemi, "brain.tiff"]))
+        ax1.imshow(plt.imread(brain1_image_name))
+        ax1.axis('off')
+        other_hemi = [x for x in cfg.hemisphere if x not in hemi][0]
+        other_hemi_tag = ' (' + other_hemi.upper() + ')'
+        brain2_image_name = os.path.join(cfg.output_dir,'_'.join([cfg.selected_conditions[0],other_hemi, hemi, "brain.tiff"]))
+        ax2.imshow(plt.imread(brain2_image_name))
+        ax2.axis('off')
+        df_to_plot = df[(df["hemisphere"]==hemi) & (df["target_hemi"]==hemi)]
+        ax3 = plot_coh_conditions(ax3,df_to_plot,df['Participant'].values[0] + hemi_tag + ' to ' + hemi_tag,cfg.selected_conditions,'Condition', cfg.ylims, group=False,plot_title='Coherence from ')
+        df_to_plot = df[(df["hemisphere"]==hemi) & (df["target_hemi"]==other_hemi)]
+        ax4 = plot_coh_conditions(ax4,df_to_plot,df['Participant'].values[0] + hemi_tag+ ' to' + other_hemi_tag,cfg.selected_conditions,'Condition', cfg.ylims, group=False,plot_title='Coherence from ')
+        title = '_'.join([id,hemi,'coherence'])
+        report.add_figure(fig=fig, title=title, section=id, tags=[hemi,'coherence',diagnosis],replace=True)
+        plt.close('all')
+    
+def add_gavg_coh_to_report(df,report,id,factor_name_in_df,zcoh=False,ci=False):
+    if zcoh:
+        plot_title = 'Normalised coherence from '
+        ylims = cfg.zcoh_ylims
+        report_tag = 'z_coherence'
+        grouping_factor = cfg.df_varnames[factor_name_in_df][:-1] #assumes variable to normalise against is always last
+    else:
+        plot_title = 'Coherence from '
+        ylims = cfg.ylims
+        report_tag = 'coherence'
+        grouping_factor = cfg.df_varnames[factor_name_in_df]
+    for factor_level in grouping_factor:
+        fig = plt.figure(figsize=(12,12), layout='constrained')
+        gs  = GridSpec(2, 2, figure=fig) 
+        ax1 = fig.add_subplot(gs[0,0])
+        ax2 = fig.add_subplot(gs[0,1])
+        ax3 = fig.add_subplot(gs[1,0])
+        ax4 = fig.add_subplot(gs[1,1])
+        hemi_axes={'lh':{'lh':ax1,
+                         'rh':ax2},  
+                    'rh':{'rh':ax3,
+                         'lh':ax4}}
+        for hemi in cfg.hemisphere:
+            for target_hemi in cfg.hemisphere:
+                hemi_tag = ' (' + hemi.upper() + ')'
+                target_hemi_tag = ' (' + target_hemi.upper() + ')'
+                df_to_plot = df[(df[factor_name_in_df] == factor_level) & (df['hemisphere'] == hemi) & (df['target_hemi'] == target_hemi)]
+                if factor_name_in_df == 'Condition':
+                    plot_coh_conditions(hemi_axes[hemi][target_hemi],df_to_plot,factor_level + hemi_tag + ' to' + target_hemi_tag,cfg.diagnoses,'Diagnosis',ylims,group=True,plot_title=plot_title,ci=ci)
+                elif factor_name_in_df == 'Diagnosis':
+                    plot_coh_conditions(hemi_axes[hemi][target_hemi],df_to_plot,factor_level + hemi_tag + ' to' + target_hemi_tag,cfg.selected_conditions,'Condition',ylims,group=True,plot_title=plot_title, ci=ci)
+
+        title = '_'.join([id,factor_level,report_tag])
+
+        report.add_figure(fig=fig, title=title, section='_'.join([id,factor_level]), tags=[hemi,report_tag],replace=True)
+        plt.close('all')
+        
+def get_zcoh(df_hemi,condition_of_interest,normalising_condition):
+    df_condition_of_interest = df_hemi[(df_hemi['Condition']==condition_of_interest)]
+    condition_of_interest_data = df_condition_of_interest['stc'].values[0] #get data of interest
+    df_normalising_condition = df_hemi[(df_hemi['Condition']==normalising_condition)] #get data to normalise against
+    normalising_condition_data = df_normalising_condition['stc'].values[0] #get data of interest
+
+    condition_of_interest_epoch_count = df_condition_of_interest['n_epochs'].values[0]
+    normalising_condition_epoch_count = df_normalising_condition['n_epochs'].values[0]
+
+    z_coh  = ( (np.emath.arctanh(np.abs(condition_of_interest_data))      - (1 / (condition_of_interest_epoch_count-2)))  -
+               (np.emath.arctanh(np.abs(normalising_condition_data)) - (1 / (normalising_condition_epoch_count-2))))  / np.sqrt((1/(condition_of_interest_epoch_count-2))+(1/(normalising_condition_epoch_count-2)))
+    return z_coh
+
+def barplot_with_swarmplot(ax,df,x_var,y_var):
+
+    if np.unique(df[x_var].values)[0] in cfg.diagnoses:
+        palette = [cfg.color_dict["misophonia"],cfg.color_dict["td"]]
+        order = ['misophonia','td']
+        hue_order = ['misophonia','td']
+        labels = ['Misophonia','Controls']
+    elif np.unique(df[x_var].values)[0] in cfg.selected_conditions:
+        palette = [cfg.color_dict["miso"],cfg.color_dict["sound2"],cfg.color_dict["white_noise"]]
+        order = cfg.selected_conditions
+        hue_order = cfg.selected_conditions
+        labels=['Trigger','Neutral','White Noise']
+    with sns.axes_style('ticks'):
+        ax = sns.barplot(x=x_var, y=y_var, data=df, capsize=.1, errorbar='se', hue = x_var, ax = ax,
+                         palette = palette,width = 0.6,order= order,hue_order= hue_order)
+        ax = sns.swarmplot(x=x_var, y=y_var, data=df, color="0", alpha=.35,size = 9,order = order,ax=ax)
+        ax.set_title('',fontsize = cfg.fontsize, fontweight="normal")
+        ax.set_xlabel('',fontsize = cfg.fontsize, fontweight="normal")
+        ax.set_ylabel('Coherence (z)',fontsize = cfg.fontsize, fontweight="normal")
+        plt.yticks(fontsize = 16, weight = "normal")
+        ax.set_xticklabels(labels=labels)
+        plt.xticks(fontsize = 14, weight = "normal",rotation = 45,ha = 'right')
+        sns.despine()
+    
+    return ax
+
+def add_connectivity_plot(df,report,timings,hemi,target_hemi,factor_name_in_df,id,zcoh=False):
+    if zcoh:
+        plot_title = 'Normalised coherence from '
+        ylims = cfg.zcoh_ylims
+        y_name = 'Coherence (z)'
+        report_tag = 'z_coherence_combined'
+        grouping_factor = cfg.df_varnames[factor_name_in_df][:-1] #assumes variable to normalise against is always last
+    else:
+        plot_title = 'Coherence from '
+        ylims = cfg.ylims
+        y_name = 'Coherence'
+        report_tag = 'coherence_combined'
+        grouping_factor = cfg.df_varnames[factor_name_in_df]
+
+    times = np.array(df['time'].values[0])
+    times2plot = (times >= timings[0]) & (times <= timings[1])
+    result = [np.mean(x[times2plot]) for x in df['stc']]
+    df[y_name] = result
+
+    for factor_level in grouping_factor:
+        fig = plt.figure(figsize=(10,4.8), layout='constrained')
+        gs  = GridSpec(1, 4, figure=fig) 
+        ax1 = fig.add_subplot(gs[0,0:3])
+        ax2 = fig.add_subplot(gs[0,3])
+
+        df_to_plot = df[(df[factor_name_in_df] == factor_level) & (df['hemisphere'] == hemi) & (df['target_hemi'] == target_hemi)]
+        hemi_tag = ' (' + hemi.upper() + ')'
+        target_hemi_tag = ' (' + target_hemi.upper() + ')'
+        if factor_name_in_df == 'Condition':
+            ax1= plot_coh_conditions(ax1,df_to_plot,cfg.plot_labels[factor_level]['label'] + hemi_tag + ' to' + target_hemi_tag,cfg.diagnoses,'Diagnosis', (-1.2,1.2), 
+                        plot_title=plot_title, ci = False,group=True,highlight_area=True,area_time_window=timings,zcoh=zcoh)
+            ax2 = barplot_with_swarmplot(ax2,df_to_plot,'Diagnosis',y_name)
+
+        elif factor_name_in_df == 'Diagnosis':
+            ax1= plot_coh_conditions(ax1,df_to_plot,cfg.plot_labels[factor_level]['label'] + hemi_tag + ' to' + target_hemi_tag,cfg.selected_conditions,'Condition', (0.1,0.7), 
+                        plot_title=plot_title, ci = False,group=True,highlight_area=True,area_time_window=timings,zcoh=zcoh)
+            ax2 = barplot_with_swarmplot(ax2,df_to_plot,'Condition',y_name)
+
+        title = '_'.join([id,report_tag,factor_level,hemi,target_hemi,str(timings[0]),str(timings[1])])
+        savetitle = title + report_tag
+        savename = os.path.join(cfg.output_dir, savetitle + ".tiff")
+        fig.savefig(savename,dpi=300)
+        report.add_figure(fig=fig, title=title, section=id, tags=[hemi,target_hemi,report_tag],replace=True)
