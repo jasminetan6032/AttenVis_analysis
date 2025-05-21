@@ -23,7 +23,7 @@ participants_df, participants_to_study = tlbx.load_participants(cfg.participants
 # for part in participants_to_rename:
 #     tlbx.rename_files(part,'_V1_grown-lh.label','_vis_lh.label')
 #     tlbx.rename_files(part,'_V1_grown-rh.label','_vis_rh.label')
-participants_to_study = ['148501']
+participants_to_study = ['057101']
 if cfg.add_participants:
     participants_to_study = tlbx.update_participants(cfg.data_savename,participants_to_study)
     if participants_to_study == []:
@@ -38,16 +38,18 @@ if not os.path.exists(cfg.data_savename) or cfg.overwrite_data or cfg.add_partic
         participant_data = []
         diagnosis,study,visit_dir,subjID_date = tlbx.get_participant_details(participants_df,sub_id)
         #load inverse operator
-        inv_path = tlbx.find_files('_inv.fif',visit_dir)[0] # erm_test_prestim_baseline_inv.fif
+        inv_path = tlbx.find_files('erm_test_prestim_baseline_inv.fif',visit_dir)[0] # 
         inverse_operator = mne.minimum_norm.read_inverse_operator(inv_path)
         src = inverse_operator["src"]
-        file_tag = '_nobaseline_nofilter_all_epo.fif'
+        file_tag = 'AttenVis_nobaseline_nofilter_all_conditions_epo.fif'
         load_fname = tlbx.find_files(file_tag,visit_dir)[0]
+        epochs_clean = mne.read_epochs(load_fname)
+
 
         for condition in cfg.plot_selected_conditions:
-            out_fname = load_fname.replace('all_epo.fif','_'.join([condition.replace('/','_'),'clean','epo.fif']))
-            epochs_clean = mne.read_epochs(out_fname)
-            baseline_evoked = tlbx.get_evoked(epochs_clean,filter=(1,30),baseline=cfg.baseline)
+            condition_tag = "(Condition == '" + condition + "')"
+            epochs_condition = tlbx.get_condition_epochs(epochs_clean,condition_tag)
+            baseline_evoked = tlbx.get_evoked(epochs_condition,filter=(1,30),baseline=cfg.baseline)
             stc = mne.minimum_norm.apply_inverse(baseline_evoked, inverse_operator, cfg.lambda2, method=cfg.con_method, pick_ori=None, verbose=True)
             for hemi in cfg.hemisphere:
                 #load_labels 
@@ -76,7 +78,6 @@ if not os.path.exists(cfg.data_savename) or cfg.overwrite_data or cfg.add_partic
         participant_data_savename = os.path.join(visit_dir,cfg.data_fname.replace('.pkl','_' + sub_id + '.pkl'))
         df_participant.to_pickle(participant_data_savename)
         tlbx.add_participant_activations_to_report(df_participant,report,sub_id)
-        tlbx.show_report(report,cfg.report_savename_hdf5)
 
 #     df= pd.DataFrame(all_participants, columns = ['Diagnosis','Participant','Study','Condition','Difficulty','Combined','hemisphere','label','stc','morphed_label','time'] )
 #     if cfg.add_participants:
@@ -94,5 +95,5 @@ if not os.path.exists(cfg.data_savename) or cfg.overwrite_data or cfg.add_partic
 # tlbx.add_fsaverage_to_report(report,df,cfg.labels_of_interest[0] + '_drawn')
 
 # # tlbx.show_report(report,cfg.report_savename_hdf5)
-# report.save(cfg.report_savename_html, overwrite=True)
-# report.save(cfg.report_savename_hdf5, overwrite=True)
+report.save(cfg.report_savename_html, overwrite=True)
+report.save(cfg.report_savename_hdf5, overwrite=True)

@@ -66,7 +66,12 @@ def import_data(mat_file):
 
 def add_group_id(redcap,dataset,dataset_file):
     participant = os.path.split(dataset_file)[1].split('_')[0]
-    group = redcap.loc[redcap["subject_id"]==participant,"asd_final"].item()
+    group_data = redcap.loc[redcap["subject_id"]==participant,"asd_final"]
+
+    if len(group_data) > 1:
+        group = group_data.iloc[1]
+    else:
+        group = redcap.loc[redcap["subject_id"]==participant,"asd_final"].item()
     dataset["group"] = group
     
     return dataset
@@ -84,12 +89,12 @@ def clean_data(dataset,percent):
     
     return correct_answers_cleaned
 
-exclude_participants = ['073801','125401']
+exclude_participants = ['007501','073801','125401']
 
 results_dir = "/autofs/space/transcend/MEG/AttenVis"
 
 results = find_files('_behaviour.mat', results_dir) 
-redcap_file = '/homes/7/jwt30/Downloads/TRANSCENDAllProjects-VisualSearchWithBeha_DATA_2024-01-30_1700.csv'
+redcap_file = '/homes/7/jwt30/Downloads/TRANSCENDAllProjects-VisualSearchWithBeha_DATA_2025-05-16_1758.csv'
 redcap = import_redcap(redcap_file)
 
 all_participants = []
@@ -97,6 +102,7 @@ for file in results:
     participant = os.path.split(file)[1].split('_')[0]
     if participant not in exclude_participants:
         data = import_data(file)
+        data['Participant'] = participant
         data_with_group = add_group_id(redcap,data,file)
         cleaned_data = clean_data(data_with_group,0.1).reset_index()
         all_participants.append(cleaned_data)

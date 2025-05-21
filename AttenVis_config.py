@@ -23,7 +23,7 @@ condition = {'target': {'label':'Target'},
             'pop-out/10': {'label':'Pop-out 10'}
              } #put the condition you want the label drawn in first
 
-plot_selected_conditions = ['search','pop-out','target']
+plot_selected_conditions = ['search','pop-out']
 brain_selected_conditions = ['search','pop-out']
 diagnoses = {'asd':{'label':'ASD'},
             'td':{'label':'TD'}}
@@ -32,23 +32,26 @@ study = ['MisoNat','MisoNat2']
 
 sensor_hemis = ['left','right']
 hemisphere = ['lh','rh']
-labels_of_interest = ['visual_drawn_label']
+labels_of_interest = ['V1']
 brain_view = 'medial'
 
-time_windows = [-0.2,1.0]
+time_windows = [-0.5,2.5]
+metadata_timewindow = [0.0,5.0]#[-1.5,0.0]
+prestimulus_baseline = (-0.2, 0.0)
 
-peak_time_window = [1.0,1.2]
+peak_time_window = [0.9,1.2]
 peak_times_hemis = {key: {key:None for key in hemisphere} for key in hemisphere}
 peak_labels_hemis = {key: {key:None for key in hemisphere} for key in hemisphere}
+peak_morphed_labels_hemis = {key: {key:None for key in hemisphere} for key in hemisphere}
 
 overwrite_report = True
-overwrite_data = True
+overwrite_data = False
 overwrite_epochs = False
-add_participants = False
+redraw_labels = False
 
 #connectivity settings                 
-tmin_plot = -0.2
-tmax_plot = 0.5
+tmin_plot = -0.3
+tmax_plot = 1.5
 freq_min = 4
 freq_max = 80
 con_method = "dSPM"
@@ -56,16 +59,16 @@ fc_method = 'coh'
 fc_mode = 'cwt_morlet'
 con_n_cycles = 3
 sfreq = 250
-snr           = 3
+snr           = 0.3
 lambda2       = 1.0 / snr**2
-baseline = (-0.2,0)
+baseline = (-0.4,-0.2)
 
 #plotting settings
 vmin = -1.0
 vmax = 1.0
 fontsize = 20
 confidence = 0.95 #ci interval for line plots
-ylims = (0,60)
+ylims = (0,15)
 zcoh_ylims = (-2.0,2.0)
 
 labels_dict = {
@@ -118,8 +121,8 @@ if not os.path.exists(output_dir):
 save_fname = '_'.join(selected_conditions + labels_of_interest + [con_method]+[str(time_windows[0]),str(time_windows[1])])
 data_fname = save_fname + '.pkl'
 data_savename = os.path.join(output_dir,data_fname)
-report_savename_html = os.path.join(output_dir,save_fname+".html")
-report_savename_hdf5 = os.path.join(output_dir,save_fname+".hdf5")
+report_savename_html = os.path.join(output_dir,save_fname+brain_view + ".html")
+report_savename_hdf5 = os.path.join(output_dir,save_fname+brain_view + ".hdf5")
 
 morph_report_savename = labels_list[0] + '_morph_from_fsaverage'
 morph_report_savename_html = os.path.join(output_dir,morph_report_savename+".html")
@@ -130,6 +133,10 @@ connectivity_compare_data_fname = connectivity_save_fname + '.pkl'
 connectivity_compare_data_savename = os.path.join(output_dir,connectivity_compare_data_fname)
 con_report_savename_html = os.path.join(output_dir,connectivity_save_fname+".html")
 con_report_savename_hdf5 = os.path.join(output_dir,connectivity_save_fname+".hdf5")
+
+inv_report_savename_hdf5 = os.path.join(data_dir,'_'.join([str(prestimulus_baseline[0]),str(prestimulus_baseline[1]),"prestim_inverses_response.hdf5"]))
+rt_report_savename_hdf5 = os.path.join(data_dir,"RTs.hdf5")
+
 
 report_title = '_'.join(list(condition.keys()) + labels_of_interest + [con_method])
 
@@ -164,7 +171,7 @@ participants_csvs = {
 participants_csv = participants_csvs[paradigm]
 
 exclude_participants = {
-    'AttenVis'  : ['000000','073801','125401','126801','110401','900005'],
+    'AttenVis'  : ['000000','073801','125401','126801','110401','900005','007501'],
     'AttenAud'  : ['000000','073801','125401','126801', '110401','KSU_te'], 
     'Misophonia': ['000000','113301','KSU_te'],
     'Misophonia_ASD_TD' :['000000','112601','KSU_te'], #113201 has asd, 113301 did not qualify as miso, 112601 had a problem with triggers
@@ -267,3 +274,6 @@ all_event_dicts = {
 
     }
 event_dict = all_event_dicts[paradigm]
+right_responses = [256,512,1024,2048]
+left_responses = [4096,8192,16384,32768]
+all_responses = right_responses + left_responses

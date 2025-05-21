@@ -9,6 +9,8 @@ import shutil
 import scipy.stats as st
 from collections import Counter
 from autoreject import get_rejection_threshold, AutoReject
+import scipy
+import csv
 
 import AttenVis_config as cfg
 
@@ -101,11 +103,37 @@ def get_participant_details(participants_df,sub_id):
         subjID_date = find_mri_recons(cfg.subj_dir,sub_id,visit_date)
     return diagnosis, study,visit_dir,subjID_date
 
-def update_participants(pkl,all_participants):
-    df = pd.read_pickle(pkl)
-    participants_already_in_dataset = np.unique(df['Participant'].values)
-    participants_to_add = [i for i in all_participants if i not in participants_already_in_dataset]
+def update_participants(csv,participants_already_in_dataset):
+    df = pd.read_csv(csv, sep=',')
+    df['Participant'] = df['Participant'].astype('string').str.zfill(6)
+    participants_in_csv = np.unique(df['Participant'].values)
+    participants_to_add = [i for i in participants_in_csv if i not in participants_already_in_dataset]
     return participants_to_add
+
+def update_meg_mri_csv():
+    participants_df = pd.read_csv(cfg.participants_csv.replace('.csv','_mri_meg.csv'), sep=',')
+    participants_df['Participant'] = participants_df['Participant'].astype('string').str.zfill(6)
+    participants_to_add = update_participants(cfg.participants_csv,np.unique(participants_df['Participant'].values))
+    if participants_to_add:
+        new_participants = participants_df[participants_df['Participant'].isin(participants_to_add)]
+        new_participants_added_df = pd.concat([participants_df, new_participants], ignore_index=True)
+        df_sorted = new_participants_added_df.sort_values(by='Participant', ascending=True)
+    else: 
+        print('No new participants to add. Checking for empty fields...')
+        nan_rows = participants_df[participants_df[['Visit_Dir','SubjID_Date']].isna().any(axis=1)]
+        if not nan_rows.empty:
+            print('Updating empty fields...')
+            for sub_id in nan_rows['Participant'].values:
+                diagnosis, study,visit_dir,subjID_date = get_participant_details(participants_df,sub_id)
+                participants_df.loc[participants_df['Participant'] == sub_id,'Visit_Dir'] = visit_dir
+                participants_df.loc[participants_df['Participant'] == sub_id,'SubjID_Date'] = subjID_date
+        else:
+            print('No empty fields to update.')
+        df_sorted = participants_df.sort_values(by='Participant', ascending=True)        
+    if 'Study' not in df_sorted.columns:
+        df_sorted['Study'] = cfg.paradigm
+    df_sorted.to_csv(cfg.participants_csv.replace('.csv','_mri_meg.csv'),index=False)
+    return df_sorted
 
 def load_misonat_participants(study):
     #load participant list
@@ -170,22 +198,26 @@ def update_participants_n(participants_df,exclude_participants,study):
     #     cfg.diagnoses[diagnosis].update({'label_n': cfg.diagnoses[diagnosis]['label'] + ' (n=' + str(n_participants[diagnosis]) + ')'})
     return participants_to_study_exclude
 
-def load_participants(participants_csv):
+def load_participants():
     """"
     This function takes the output of analyse_miso_participants, either analysed_participants_demographics.csv or collected_participants_demographics.csv or a manually set up csv for miso_asd_td comparisons.
 
     """
-    participants_df = pd.read_csv(participants_csv, sep=',')
-    participants_df['Participant'] = participants_df['Participant'].astype('string').str.zfill(6)
+    participants_df = update_meg_mri_csv()
+
     participants_to_study = list(set(participants_df['Participant']))
     participants_to_study.sort()
+
     df_analysed_participants = participants_df[participants_df['Participant'].isin(participants_to_study)]
     participants_to_study_exclude = update_participants_n(df_analysed_participants,cfg.excluded_participants,'na')
 
     return participants_df,participants_to_study_exclude
 
 def get_condition_epochs(epochs,condition):
-    cond_epochs = epochs[condition]
+    if condition == None:
+        cond_epochs = epochs
+    else:
+        cond_epochs = epochs[condition]
     reject = get_rejection_threshold(cond_epochs, ch_types=['mag','grad'], decim=2)
     epochs_clean = cond_epochs.drop_bad(reject=reject)
     return epochs_clean
@@ -219,7 +251,7 @@ def load_drawn_labels(labels_list,hemi,subjID_date,participant_dir,grown=False):
     labels_to_combine = []
     for label_name in labels_list:
         if grown == True:
-            label_name = label_name + '-' + hemi +'.label'#labels grown from seeds follow the mne convention of -lh,-rh
+            label_name = label_name + '_grown'+ '-' + hemi +'.label'#labels grown from seeds follow the mne convention of -lh,-rh
         else:
             label_name = label_name + '_' + hemi +'.label'
         fname_label = find_files(label_name,participant_dir)[0]
@@ -289,16 +321,16 @@ def morph_fslabel(label,subjID_date,hemi):
 
     return morphed_label
 
-def show_report(report,report_name):
+def show_report(report_name):
     """
     Show html repot for paradigm
     """
     print('\n>>> TranscendTLBX: Creating .html report\n')
     if os.path.exists(report_name):
         report  = mne.open_report(report_name)
+        report.save(os.path.join(report_name.replace('.hdf5','.html')),verbose=False,overwrite=True)    
     else:
         raise TypeError('ERROR: No report found in paradgm directory')
-    report.save(os.path.join(report_name.replace('.hdf5','.html')),verbose=False,overwrite=True)    
 
 def find_peak_grow_label(stc,hemi,tmin,tmax,label_size,subjID_date,peak_type,file_location):
     peak_vertex,peak_time = stc.get_peak(hemi = hemi, tmin = tmin,tmax = tmax)
@@ -641,6 +673,8 @@ def add_fsaverage_to_report(report,df,label_name,seed_hemi=None):
     fig_to_save.savefig(savename,dpi=300)
     plt.close()
     report.add_figure(fig=fig, title=savetitle, section='gavg', tags=label_name,replace=True)
+    report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
+
 
 
 def plot_stc(stc,hemi,initial_time,annot_label,condition,label_color,other_hemi=None):
@@ -733,26 +767,23 @@ def add_participant_activations_to_report(df,report,id):
         hemi_tag = ' (' + hemi.upper() + ')'
         #plot time series activations   
         fig1,filename= plot_activations(df_hemi,'Activations from ',df['Participant'].values[0] + hemi_tag,cfg.plot_selected_conditions,'Condition', group=False)
-        fig = plt.figure(figsize=(24,6), layout='constrained')
-        gs  = GridSpec(1, 4, figure=fig) 
+        fig = plt.figure(figsize=(18,6), layout='constrained')
+        gs  = GridSpec(1, 3, figure=fig) 
         ax1 = fig.add_subplot(gs[0,0])
         ax2 = fig.add_subplot(gs[0,1])
         ax3 = fig.add_subplot(gs[0,2])
-        ax4 = fig.add_subplot(gs[0,3])
-        brain1_image_name = os.path.join(cfg.output_dir,'_'.join([list(cfg.condition.keys())[0],hemi,hemi, "brain.tiff"]))
+        brain1_image_name = os.path.join(cfg.output_dir,'_'.join([list(cfg.brain_selected_conditions)[0],hemi,hemi, "brain.tiff"]))
         ax1.imshow(plt.imread(brain1_image_name))
         ax1.axis('off')
-        brain2_image_name = os.path.join(cfg.output_dir,'_'.join([list(cfg.brain_selected_conditions)[0],hemi,hemi, "brain.tiff"]))
+        brain2_image_name = os.path.join(cfg.output_dir,'_'.join([list(cfg.brain_selected_conditions)[1],hemi,hemi, "brain.tiff"]))
         ax2.imshow(plt.imread(brain2_image_name))
         ax2.axis('off')
-        brain3_image_name = os.path.join(cfg.output_dir,'_'.join([list(cfg.brain_selected_conditions)[1],hemi,hemi, "brain.tiff"]))
-        ax3.imshow(plt.imread(brain3_image_name))
+        ax3.imshow(plt.imread(filename))
         ax3.axis('off')
-        ax4.imshow(plt.imread(filename))
-        ax4.axis('off')
         title = '_'.join([id,hemi,'activations'])
         report.add_figure(fig=fig, title=title, section=id, tags=[hemi,'activations',diagnosis],replace=True)
         plt.close('all')
+        report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
 
 def add_gavg_activations_to_report(df,report,id,grouping_factor,factor_name_in_df):
     for factor_level in grouping_factor:
@@ -760,7 +791,10 @@ def add_gavg_activations_to_report(df,report,id,grouping_factor,factor_name_in_d
         for hemi in cfg.hemisphere:
             hemi_tag = ' (' + hemi.upper() + ')'
             df_to_plot = df[(df[factor_name_in_df] == factor_level) & (df['hemisphere'] == hemi)]
-            fig1,filename= plot_activations(df_to_plot,'Activations from ',factor_level + hemi_tag,cfg.plot_selected_conditions,'Condition',group=True,ci = True)
+            if factor_name_in_df == 'Diagnosis':
+                fig1,filename= plot_activations(df_to_plot,'Activations from ',factor_level + hemi_tag,cfg.plot_selected_conditions,'Condition',group=True,ci = True)
+            elif factor_name_in_df == 'Condition':
+                fig1,filename= plot_activations(df_to_plot,'Activations from ',factor_level + hemi_tag,cfg.diagnoses,'Diagnosis',group=True,ci = True)
             filenames_hemis.update({hemi:filename})
         fig = plt.figure(figsize=(18,6), layout='constrained')
         gs  = GridSpec(1, 2, figure=fig) 
@@ -776,6 +810,7 @@ def add_gavg_activations_to_report(df,report,id,grouping_factor,factor_name_in_d
 
         report.add_figure(fig=fig, title=title, section='_'.join([id,factor_level]), tags=[hemi,'activations'],replace=True)
         plt.close('all')
+        report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
 
 def find_strongest_sensor(sensor_data,filt):
     strongest_sensors = {'mag':{},
@@ -1099,3 +1134,285 @@ def add_connectivity_plot(df,report,timings,hemi,target_hemi,factor_name_in_df,i
         savename = os.path.join(cfg.output_dir, savetitle + ".tiff")
         fig.savefig(savename,dpi=300)
         report.add_figure(fig=fig, title=title, section=id, tags=[hemi,target_hemi,report_tag],replace=True)
+
+def initialize_error_log(filepath='error_log.csv'):
+    with open(filepath, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['dataset', 'error_message'])
+
+def attenvis_metadata(events,sfreq,mat_file,participant,locked_to = 'stimuli'):
+    find_response_triggers(events)
+    error_log = []
+    if locked_to == 'response':
+        row_events = [ "response/left","response/right"]
+
+    else:
+        row_events = ["target"]
+
+    keep_first = ["condition","response"]
+    metadata, events_meta, event_id_meta = mne.epochs.make_metadata(
+        events=events,
+        event_id=cfg.event_dict,
+        tmin=cfg.metadata_timewindow[0],
+        tmax=cfg.metadata_timewindow[1],
+        sfreq=sfreq,
+        row_events=row_events,
+        keep_first=keep_first,
+    )  
+    metadata[['Condition','difficulty']] = metadata['first_condition'].str.split('/',expand = True)
+    metadata['RT'] = metadata['response'] - metadata['condition']
+    metadata.reset_index(drop=True,inplace=True)
+    metadata = metadata.drop(columns=['condition/search/4','condition/search/6','condition/search/8','condition/search/10','condition/pop-out/4','condition/pop-out/6','condition/pop-out/8','condition/pop-out/10','target','response/right','response/left'])
+    try: 
+        mat = scipy.io.loadmat(mat_file)
+        msg = 'Loading ' + mat_file
+        print(msg)
+        error_log.append(msg)
+    except:
+        msg = 'No behaviour mat file found'
+        print(msg)
+        error_log.append(msg)
+        mat = None
+    if len(mat['correctTrials'][0]) == len(metadata):
+        metadata['correct'] = mat['correctTrials'][0]
+    elif os.path.split(mat_file)[1] == '057101_AttenVis_run03_behaviour.mat':
+        metadata['correct'] = mat['correctTrials'][0][8:]
+    elif os.path.split(mat_file)[1] == '086901_AttenVis_run03_behaviour.mat':
+        metadata['correct'] = mat['correctTrials'][0][8:]
+    elif os.path.split(mat_file)[1] == '098101_AttenVis_run03_behaviour.mat':
+        metadata['correct'] = mat['correctTrials'][0][:2]
+    elif os.path.split(mat_file)[1] == '109101_AttenVis_run03_behaviour.mat':
+        metadata['correct'] = mat['correctTrials'][0][2:]        
+    else:
+        msg = 'Incorrect number of trials. Adding empty correct column'
+        print(msg)
+        error_log.append(msg)
+        metadata['correct'] = np.nan
+    if metadata[metadata[['RT']].isna().any(axis=1)].empty:
+        msg = 'No missing values in RT'
+        print(msg)
+        error_log.append(msg)
+    else:
+        msg = metadata[metadata[['RT']].isna().any(axis=1)]
+        print(msg)
+        error_log.append(msg)
+
+    with open('error_log.csv', 'a', newline='') as f:
+        writer = csv.writer(f)
+        for msg in error_log:
+            writer.writerow([participant,msg])
+    return metadata, events_meta, event_id_meta
+
+def clean_metadata(dataset,percent):
+    difficulty_order = ['4','6','8','10']
+    dataset['difficulty'] = pd.Categorical(dataset['difficulty'], categories=difficulty_order, ordered=True)
+    condition_order = ['pop-out','search']
+    dataset['Condition'] = pd.Categorical(dataset['Condition'], categories=condition_order, ordered=True)
+    if dataset['correct'].isnull().all():
+        correct_answers = dataset
+    else:
+        correct_answers = dataset.loc[dataset['correct']==1,:]
+    correct_answers_lower_bound = correct_answers.loc[correct_answers["RT"]>0.1]
+    convert_percent = 1-percent
+    all_conditions_difficulties = []
+    for level in difficulty_order:
+        for condition in condition_order:
+            correct_answers_condition_difficulty = correct_answers_lower_bound.loc[(correct_answers_lower_bound['difficulty'] == level) & (correct_answers_lower_bound['Condition'] == condition)]
+            percent_cutoff = correct_answers_lower_bound["RT"].quantile(convert_percent)
+            correct_answers_cleaned = correct_answers_lower_bound.loc[correct_answers_lower_bound["RT"]<percent_cutoff]
+            all_conditions_difficulties.append(correct_answers_condition_difficulty)
+    correct_answers_cleaned = pd.concat(all_conditions_difficulties).sort_index()
+    return correct_answers_cleaned
+
+def plot_participant_RT_hist(data, data_cleaned,report,id):
+    fig = plt.figure(figsize=(10,4.8), layout='constrained')
+    gs  = GridSpec(1, 2, figure=fig) 
+    ax1 = fig.add_subplot(gs[0,0])
+    ax2 = fig.add_subplot(gs[0,1])
+    ax1.hist(data["RT"],bins=30)
+    ax1.set_title('Reaction Time - Before Cleaning')
+    ax1.set_xlabel('RT (ms)')
+    ax1.set_ylabel('Frequency')
+
+    ax2.hist(data_cleaned["RT"],bins=30)
+    ax2.set_title('Reaction Time - After Cleaning')
+    ax2.set_xlabel('RT (ms)')
+    ax2.set_ylabel('Frequency')
+    report.add_figure(fig=fig, title='RT_hist', section=id, tags=['histogram'],replace=True)
+    plt.close('all')
+
+def plot_RT(data,report,id):
+# Create a figure handle
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    # Plot with median and bootstrapped 95% confidence intervals
+    sns.lineplot(
+        data=data,
+        x='difficulty',
+        y='RT',
+        hue='Condition',
+        marker='o',
+        estimator=np.median,
+        errorbar=('ci', 95),         # Bootstrapped CI
+        n_boot=1000,       # Number of bootstrap samples (adjust as needed)
+        ax=ax              # Use figure handle
+    )
+
+    ax.set_title('Median Reaction Time by Difficulty and Condition')
+    ax.set_ylabel('Median RT (ms)')
+    ax.set_xlabel('Difficulty')
+    report.add_figure(fig=fig, title='RTs', section=id, tags=['line_plot'],replace=True)
+    plt.close('all')
+
+
+def find_response_triggers(events):
+    events_data = pd.DataFrame(events)
+    events_data.columns = ['sample', 'initialState','trigger']
+    trigger_counts = events_data['trigger'].value_counts()
+    #check for largest number of triggers (leave case for those that are missing one side - eg. participant 075801)
+    likely_response_triggers = trigger_counts[trigger_counts.index > 255].nlargest(2).index
+    
+    if len(likely_response_triggers) == 2:
+        if np.any(likely_response_triggers[0] == cfg.right_responses):
+            cfg.event_dict.update({'response/right':likely_response_triggers[0]})
+            cfg.event_dict.update({'response/left':likely_response_triggers[1]})
+        elif np.any(likely_response_triggers[0] == cfg.left_responses):
+            cfg.event_dict.update({'response/right':likely_response_triggers[1]})
+            cfg.event_dict.update({'response/left':likely_response_triggers[0]})
+
+    elif len(likely_response_triggers) == 1:
+        if np.any(likely_response_triggers[0] == cfg.right_responses):
+            cfg.event_dict.update({'response/right':likely_response_triggers[0]})
+            cfg.event_dict.pop('response/left')
+            print("Warning: Missing left response")
+
+        elif np.any(likely_response_triggers[0] == cfg.left_responses):
+            cfg.event_dict.update({'response/left':likely_response_triggers[0]})
+            cfg.event_dict.pop('response/right')
+            print("Warning: Missing right response")
+            
+    elif len(likely_response_triggers) == 0:
+        print("Warning: Missing all response triggers")
+
+def plot_RTs_attenvis(metadata):
+    metadata['difficulty'] = pd.Categorical(metadata['difficulty'],categories = ['4','6','8','10'], ordered=True)
+    metadata['Condition'] = pd.Categorical(metadata['Condition'],categories = ['pop-out','search'], ordered=True)
+    plt.figure(figsize=(8, 6))
+    sns.lineplot(data=metadata, x='difficulty', y='RT', hue='Condition', marker='o',estimator = np.median,errorbar='se')
+
+
+def epochs_metadata(participant,visit_dir,locked_to ='stimuli', overwrite=False):
+    transcend_data_dir = os.path.join(cfg.transcend_data_dir,'AttenVis',participant,os.path.split(visit_dir)[1])
+    raw_sss_file = find_files('_raw_tsss.fif',visit_dir)
+    raw_sss_file.sort()
+    epochs_list = []
+
+    for file in raw_sss_file:
+
+        raw_sss = mne.io.read_raw_fif(file,preload=True,verbose=False)
+        ica_file = file.replace('_raw_tsss.fif','_ica.fif')
+        ica = mne.preprocessing.read_ica(ica_file)
+        ica.apply(raw_sss)
+        events_fname_tag = os.path.split(file)[1].replace('_raw_tsss.fif','_fixed_eve.fif')
+        events_fname = find_files(events_fname_tag,transcend_data_dir)
+        events = mne.read_events(events_fname[0])
+
+        mat_file = events_fname[0].replace('_fixed_eve.fif','_behaviour.mat')
+        metadata,events_meta,event_id_meta = attenvis_metadata(events,raw_sss.info['sfreq'],mat_file,participant,locked_to=locked_to)
+        epochs = mne.Epochs(
+            raw=raw_sss,
+            events=events_meta,
+            tmin=cfg.time_windows[0],
+            tmax=cfg.time_windows[1],
+            event_id=event_id_meta,
+            reject = None,
+            reject_by_annotation = False,
+            picks="meg",
+            baseline = None,
+            on_missing="ignore",
+            metadata=metadata,
+        ).load_data()
+        epochs_list.append(epochs)
+
+    all_epochs = mne.concatenate_epochs(epochs_list)
+    if locked_to == 'response':
+        all_epochs.save(os.path.join(visit_dir,'_'.join([participant,'AttenVis','nobaseline_nofilter_all_conditions_metadata_response_epo.fif'])),overwrite=overwrite)
+    else:
+        all_epochs.save(os.path.join(visit_dir,'_'.join([participant,'AttenVis','nobaseline_nofilter_all_conditions_metadata_epo.fif'])),overwrite=overwrite)
+
+    return all_epochs
+
+def inverse_from_prestimulus_baseline(participant,all_epochs,evoked, visit_dir,report,overwrite=False):
+    #load fwd for inverse operator
+    fwd_fname = find_files('_fwd.fif',visit_dir)[0]
+    fwd = mne.read_forward_solution(fwd_fname)
+
+    #compute covariance from baseline
+    noise_cov = mne.compute_covariance(all_epochs.apply_baseline(cfg.prestimulus_baseline), tmax=0, method = "auto",rank = None)
+    cov_fname = fwd_fname.replace('_run01_fwd.fif','_prestim_baseline_cov.fif')
+    mne.write_cov(cov_fname, noise_cov, overwrite=overwrite)
+    report.add_covariance(cov = cov_fname,info = all_epochs.info,title = participant + ' Covariance from prestimulus baseline',replace = True)
+    report.add_evokeds(evoked,titles = participant + ' Evoked from prestimulus baseline',noise_cov = noise_cov,replace = True)
+    report.save(cfg.inv_report_savename_hdf5, verbose=False, overwrite=overwrite)
+    #compute inverse operator
+    inv_fname = fwd_fname.replace('_run01_fwd.fif','_prestim_baseline_inv.fif')
+    inv_operator  = mne.minimum_norm.make_inverse_operator(all_epochs.info, fwd, noise_cov, loose=0.2, depth=0.8, rank='info')
+    mne.minimum_norm.write_inverse_operator(inv_fname,inv_operator,overwrite=overwrite)
+
+def add_whitened_evoked_erm(participant,visit_dir,evoked,report):
+    erm_cov_fname = find_files(participant + '_erm_cov.fif', visit_dir)
+    erm_cov = mne.read_cov(erm_cov_fname[0])
+    fig = evoked.plot_white(erm_cov, time_unit = 's',show=False)
+    report.add_figure(fig=fig, title=participant + ' Evoked from erm',  tags='whitened_erm',replace=True)
+    # report.add_evokeds(evoked,titles = participant + ' Evoked from erm',noise_cov = erm_cov_fname,replace = True)
+    report.save(cfg.inv_report_savename_hdf5, verbose=False, overwrite=True)
+
+def collate_participants_data(participants_df,participants_to_study):
+    all_participants = []
+    for participant in participants_to_study:
+        visit_dir = participants_df[participants_df['Participant'] == participant]['Visit_Dir'].values[0]
+        filename = find_files(cfg.data_fname.replace('.pkl','_' + participant + '.pkl'),visit_dir)
+        participant_df = pd.read_pickle(filename[0])
+        all_participants.append(participant_df)
+    all_participants_df = pd.concat(all_participants,ignore_index=True).sort_values(by = 'Participant')
+    return all_participants_df
+
+def draw_label_from_epochs(visit_dir,subjID_date,epochs,inverse_operator,label_to_draw_from = 'fs_drawn',filter = None):
+    #load epochs and get evoked
+    epochs_clean = get_condition_epochs(epochs.copy(),condition = None)
+    baseline_evoked = get_evoked(epochs_clean,filter=filter,baseline=cfg.baseline)
+    stc = mne.minimum_norm.apply_inverse(baseline_evoked, inverse_operator, cfg.lambda2, method=cfg.con_method, pick_ori=None, verbose=True)
+    
+    for hemi in cfg.hemisphere:
+        #load_labels
+        if label_to_draw_from == 'fs_drawn': 
+            annot_label = morph_fslabel(cfg.labels_list[0],subjID_date,hemi)[0]
+        elif label_to_draw_from == 'annot':
+            parc = 'aparc.a2009s'
+            annot_label = load_annot_labels(cfg.labels_list,subjID_date,parc,hemi,cfg.subj_dir)
+        stc_from_annot_label = stc.in_label(annot_label)
+        grown_label,morphed_label,label_fname,peak_time = find_peak_grow_label(stc_from_annot_label,hemi,cfg.peak_time_window[0],cfg.peak_time_window[1],5,subjID_date,'pow',visit_dir)
+        cfg.peak_labels_hemis.update({hemi:grown_label})
+        cfg.peak_morphed_labels_hemis.update({hemi:morphed_label})
+        cfg.peak_times_hemis.update({hemi:peak_time})
+
+def load_epochs(file_tag,visit_dir,resample=False):
+    load_fname = find_files(file_tag,visit_dir)[0]
+    epochs = mne.read_epochs(load_fname)
+    if resample:
+        epochs   = epochs.resample(cfg.sfreq)
+    return load_fname, epochs
+def load_inverse_operator(file_tag,visit_dir):
+    #load inverse operator
+    inv_path = find_files(file_tag,visit_dir)[0] 
+    inverse_operator = mne.minimum_norm.read_inverse_operator(inv_path)
+    return inverse_operator
+
+def generate_report():
+    if os.path.exists(cfg.report_savename_hdf5):
+        report = mne.open_report(cfg.report_savename_hdf5)
+    else:
+        report = mne.Report(title=cfg.report_title)
+        report.save(cfg.report_savename_hdf5, overwrite=True)
+
+    return report

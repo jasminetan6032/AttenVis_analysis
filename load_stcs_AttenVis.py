@@ -20,7 +20,7 @@ def find_file(search_string,data_dir):
                 
     return file  
 
-participant = '011201'
+participant = '150701'
 paradigm = 'AttenVis'
 subj_dir='/autofs/space/transcend/MRI/WMA/recons/'
 
@@ -43,11 +43,11 @@ if participant != "fsaverage":
     inv_path = tlbx.find_files('_inv.fif',data_dir)[0]
     inverse_operator = mne.minimum_norm.read_inverse_operator(inv_path)
     src = inverse_operator["src"]
-    load_fname1_lh = find_file('_nobaseline_nofilter_Pop-Outs_epo.fif', data_dir) #'  _20190515_Search_epo.fif 20190515_Search-lh.stc
+    load_fname1_lh = find_file('_nobaseline_nofilter_search_clean_epo.fif', data_dir) #'  _20190515_Search_epo.fif 20190515_Search-lh.stc
     epochs = mne.read_epochs(load_fname1_lh)
     baseline_evoked = tlbx.get_evoked(epochs,filter=(0.5,20),baseline=(-0.2,0))
     stc = mne.minimum_norm.apply_inverse(baseline_evoked, inverse_operator, cfg.lambda2, method='dSPM', pick_ori=None, verbose=True)
-    meg_date = int(os.path.split(load_fname1_lh)[1].split('_')[2])
+    # meg_date = int(os.path.split(load_fname1_lh)[1].split('_')[2])
 
     # if len(valid_directories) == 1:
     #     subjID_date = possible_directories[valid_directories[0]]
