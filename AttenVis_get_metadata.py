@@ -3,7 +3,7 @@ import helper_functions as tlbx
 import AttenVis_config as cfg
 
 participants_df, participants_to_study = tlbx.load_participants()
-participants_to_study = ['109101']
+participants_to_study = ['098101']
 if cfg.inv_report_savename_hdf5 is None:
     report = mne.Report(title='AttenVis Prestimulus Inverses')
     report.save(cfg.inv_report_savename_hdf5, overwrite=True)

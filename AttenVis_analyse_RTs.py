@@ -4,7 +4,7 @@ import helper_functions as tlbx
 import AttenVis_config as cfg
 
 participants_df, participants_to_study = tlbx.load_participants()
-# participants_to_study = ['103301','109501','110501']
+# participants_to_study = ['108901']
 if cfg.rt_report_savename_hdf5 is None:
     report = mne.Report(title='AttenVis Reaction Times')
     report.save(cfg.rt_report_savename_hdf5, overwrite=True)

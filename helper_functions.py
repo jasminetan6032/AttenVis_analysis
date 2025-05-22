@@ -1178,11 +1178,13 @@ def attenvis_metadata(events,sfreq,mat_file,participant,locked_to = 'stimuli'):
     elif os.path.split(mat_file)[1] == '057101_AttenVis_run03_behaviour.mat':
         metadata['correct'] = mat['correctTrials'][0][8:]
     elif os.path.split(mat_file)[1] == '086901_AttenVis_run03_behaviour.mat':
-        metadata['correct'] = mat['correctTrials'][0][8:]
-    elif os.path.split(mat_file)[1] == '098101_AttenVis_run03_behaviour.mat':
-        metadata['correct'] = mat['correctTrials'][0][:2]
+        metadata['correct'] = mat['correctTrials'][0][5:]
+    elif os.path.split(mat_file)[1] == '098101_AttenVis_run01_behaviour.mat':
+        metadata['correct'] = mat['correctTrials'][0][:-2]
+    elif os.path.split(mat_file)[1] == '101901_AttenVis_run01_behaviour.mat':
+        metadata['correct'] = mat['correctTrials'][0][4:]  
     elif os.path.split(mat_file)[1] == '109101_AttenVis_run03_behaviour.mat':
-        metadata['correct'] = mat['correctTrials'][0][2:]        
+        metadata['correct'] = mat['correctTrials'][0][3:]        
     else:
         msg = 'Incorrect number of trials. Adding empty correct column'
         print(msg)

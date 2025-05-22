@@ -134,7 +134,7 @@ connectivity_compare_data_savename = os.path.join(output_dir,connectivity_compar
 con_report_savename_html = os.path.join(output_dir,connectivity_save_fname+".html")
 con_report_savename_hdf5 = os.path.join(output_dir,connectivity_save_fname+".hdf5")
 
-inv_report_savename_hdf5 = os.path.join(data_dir,'_'.join([str(prestimulus_baseline[0]),str(prestimulus_baseline[1]),"prestim_inverses_response.hdf5"]))
+inv_report_savename_hdf5 = os.path.join(data_dir,'_'.join([str(prestimulus_baseline[0]),str(prestimulus_baseline[1]),"prestim_inverses_stimulis.hdf5"]))
 rt_report_savename_hdf5 = os.path.join(data_dir,"RTs.hdf5")
 
 
@@ -171,7 +171,7 @@ participants_csvs = {
 participants_csv = participants_csvs[paradigm]
 
 exclude_participants = {
-    'AttenVis'  : ['000000','073801','125401','126801','110401','900005','007501'],
+    'AttenVis'  : ['000000','073801','125401','126801','110401','108901','900005','007501'],
     'AttenAud'  : ['000000','073801','125401','126801', '110401','KSU_te'], 
     'Misophonia': ['000000','113301','KSU_te'],
     'Misophonia_ASD_TD' :['000000','112601','KSU_te'], #113201 has asd, 113301 did not qualify as miso, 112601 had a problem with triggers
