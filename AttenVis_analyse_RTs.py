@@ -32,7 +32,12 @@ for sub_id in participants_to_study:
     all_participants.append(cleaned_metadata)
 
 df = pd.concat(all_participants)
-
+df.to_pickle(cfg.rt_data_savename)
 tlbx.plot_RT(df,report,'gavg')
-median_df = df.groupby(['Condition', 'difficulty'])['RT'].median().reset_index()
+tlbx.plot_RT(df[df['Diagnosis']=='asd'],report,'gavg_asd')
+tlbx.plot_RT(df[df['Diagnosis']=='td'],report,'gavg_td')
+
+median_df = df.groupby(['Condition', 'difficulty','Diagnosis'])['RT'].median().reset_index()
 print(median_df)
+
+tlbx.show_report(cfg.rt_report_savename_hdf5)

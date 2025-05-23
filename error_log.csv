@@ -705,3 +705,24 @@ dataset,error_message
 098101,"    event_name  condition  response first_condition first_response Condition difficulty  RT  correct
 62      target      0.817       NaN        search/6                   search          6 NaN        1
 144     target      0.817       NaN       pop-out/4                  pop-out          4 NaN        1"
+008301,Loading /autofs/space/transcend/MEG/AttenVis/008301/visit_20220531/008301_AttenVis_run01_behaviour.mat
+008301,"  event_name  condition  response first_condition first_response Condition difficulty  RT  correct
+0     target        NaN       NaN                                                None NaN        1"
+008301,Loading /autofs/space/transcend/MEG/AttenVis/008301/visit_20220531/008301_AttenVis_run01_behaviour.mat
+008301,No missing values in RT
+008301,Loading /autofs/space/transcend/MEG/AttenVis/008301/visit_20220531/008301_AttenVis_run02_behaviour.mat
+008301,No missing values in RT
+008301,Loading /autofs/space/transcend/MEG/AttenVis/008301/visit_20220531/008301_AttenVis_run03_behaviour.mat
+008301,No missing values in RT
+008301,Loading /autofs/space/transcend/MEG/AttenVis/008301/visit_20220531/008301_AttenVis_run01_behaviour.mat
+008301,No missing values in RT
+008301,Loading /autofs/space/transcend/MEG/AttenVis/008301/visit_20220531/008301_AttenVis_run02_behaviour.mat
+008301,No missing values in RT
+008301,Loading /autofs/space/transcend/MEG/AttenVis/008301/visit_20220531/008301_AttenVis_run03_behaviour.mat
+008301,No missing values in RT
+008301,Loading /autofs/space/transcend/MEG/AttenVis/008301/visit_20220531/008301_AttenVis_run01_behaviour.mat
+008301,No missing values in RT
+008301,Loading /autofs/space/transcend/MEG/AttenVis/008301/visit_20220531/008301_AttenVis_run02_behaviour.mat
+008301,No missing values in RT
+008301,Loading /autofs/space/transcend/MEG/AttenVis/008301/visit_20220531/008301_AttenVis_run03_behaviour.mat
+008301,No missing values in RT

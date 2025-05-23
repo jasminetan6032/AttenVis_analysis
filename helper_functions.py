@@ -103,6 +103,13 @@ def get_participant_details(participants_df,sub_id):
         subjID_date = find_mri_recons(cfg.subj_dir,sub_id,visit_date)
     return diagnosis, study,visit_dir,subjID_date
 
+def read_participant_details_from_dataframe(participants_df,sub_id):
+    visit_dir = participants_df[participants_df['Participant'] == sub_id]['Visit_Dir'].values[0]
+    diagnosis = participants_df[participants_df['Participant'] == sub_id]['Diagnosis'].values[0]
+    study = participants_df[participants_df['Participant'] == sub_id]['Study'].values[0]
+    subjID_date = participants_df[participants_df['Participant'] == sub_id]['SubjID_Date'].values[0]
+    return diagnosis, study,visit_dir,subjID_date
+
 def update_participants(csv,participants_already_in_dataset):
     df = pd.read_csv(csv, sep=',')
     df['Participant'] = df['Participant'].astype('string').str.zfill(6)
@@ -381,7 +388,10 @@ def plot_time_frequency(times,freqs,condition,output_dir,miso,td,title1,title2,h
         title = 'Evoked response to white noise' 
     elif condition == 'amp_mod':
         title = 'Evoked response to amplitude modulated white noise' 
-
+    elif condition == 'search':
+        title = 'Evoked response to stimuli during Search' 
+    elif condition == 'pop-out':
+        title = 'Evoked response to stimuli during Pop-Out' 
     if hemi:
         fig.suptitle(title + ' (' + hemi.upper() + ')',fontsize = 22)
     else:
@@ -526,18 +536,19 @@ def plot_pac(low_fq_range,high_fq_range,condition,output_dir,miso,td,title1,titl
 def add_tfrs_to_report(df,report,id,title1,title2):
     times = df["time"].values[0]
     freqs = np.arange(cfg.freq_min,cfg.freq_max,1)
+    freqs_to_plot = np.arange(cfg.freq_min_plot,cfg.freq_max_plot+1,1)
     for condition in cfg.brain_selected_conditions:
         image_names = []
         for hemi in cfg.hemisphere:
             df_hemi = df[df["hemisphere"]==hemi]
             #plot non-normalised power
             df_to_plot = df_hemi[(df_hemi['Diagnosis'] == 'asd') & (df_hemi['Condition']==condition)]
-            miso_data = df_to_plot['power'].values.mean()
+            miso_data = df_to_plot['power'].values.mean()[(freqs >= cfg.freq_min_plot) & (freqs <= cfg.freq_max_plot),:]
 
             df_to_plot = df_hemi[(df_hemi['Diagnosis'] == 'td') & (df_hemi['Condition']==condition)]
-            td_data = df_to_plot['power'].values.mean()
+            td_data = df_to_plot['power'].values.mean()[(freqs >= cfg.freq_min_plot) & (freqs <= cfg.freq_max_plot),:]
 
-            fig1, name = plot_time_frequency(times,freqs,condition,cfg.output_dir,miso_data,td_data,title1,title2, hemi=hemi)
+            fig1, name = plot_time_frequency(times,freqs_to_plot,condition,cfg.output_dir,miso_data,td_data,title1,title2, hemi=hemi)
             #save fig
             fig_to_save = fig1.get_figure()
             fig_to_save.savefig(name.replace('.tiff','.svg'),format="svg")
@@ -576,6 +587,8 @@ def add_tfrs_to_report_three(df,report,id,title1,title2,title3):
             fig1, name = plot_time_frequency_three(times,freqs,condition,cfg.output_dir,miso_data,asd_data,td_data,title1,title2, title3, hemi=hemi)
             title = '_'.join([id,hemi,condition,'power'])
             report.add_figure(fig=fig1, title=title, section=id, tags=[hemi,condition,'power'],replace=True)
+            report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
+
             plt.close('all')
 
 def add_participant_tfrs_to_report(df,report,id):
@@ -592,6 +605,7 @@ def add_participant_tfrs_to_report(df,report,id):
         fig1, name = plot_time_frequency(times,freqs,condition,cfg.output_dir,lh_data,rh_data,title1='lh',title2='rh')
         title = '_'.join([id,condition,'power'])
         report.add_figure(fig=fig1, title=title, section=id, tags=[condition,'power'],replace=True)
+        report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
         plt.close('all')
 
 def add_participant_pacs_to_report(df,report,id):
@@ -965,7 +979,7 @@ def plot_power_over_time(ax,df,tag,factor_name_in_df,freqs,group=False,highlight
 def add_gavg_power_over_time_to_report(df,report,id,factor_name_in_df,freqs,ci=False):
 
     plot_title = 'Alpha power in '
-    ylims = (-0.4,0.4)
+    ylims = cfg.power_line_plot_ylims
     report_tag = 'alpha_power'
     grouping_factor = cfg.df_varnames[factor_name_in_df]
     for factor_level in grouping_factor:
@@ -986,6 +1000,8 @@ def add_gavg_power_over_time_to_report(df,report,id,factor_name_in_df,freqs,ci=F
         title = '_'.join([id,factor_level,report_tag])
 
         report.add_figure(fig=fig, title=title, section='_'.join([id,factor_level]), tags=[hemi,report_tag],replace=True)
+        report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
+
         plt.close('all')
 
 def add_participant_coh_to_report(df,report,id):
@@ -1205,15 +1221,18 @@ def attenvis_metadata(events,sfreq,mat_file,participant,locked_to = 'stimuli'):
             writer.writerow([participant,msg])
     return metadata, events_meta, event_id_meta
 
-def clean_metadata(dataset,percent):
+def clean_metadata(dataset,percent,correct_answers_only = False):
     difficulty_order = ['4','6','8','10']
     dataset['difficulty'] = pd.Categorical(dataset['difficulty'], categories=difficulty_order, ordered=True)
     condition_order = ['pop-out','search']
     dataset['Condition'] = pd.Categorical(dataset['Condition'], categories=condition_order, ordered=True)
-    if dataset['correct'].isnull().all():
-        correct_answers = dataset
+    if correct_answers_only:
+        if dataset['correct'].isnull().all():
+            correct_answers = dataset
+        else:
+            correct_answers = dataset.loc[dataset['correct']==1,:]
     else:
-        correct_answers = dataset.loc[dataset['correct']==1,:]
+        correct_answers = dataset
     correct_answers_lower_bound = correct_answers.loc[correct_answers["RT"]>0.1]
     convert_percent = 1-percent
     all_conditions_difficulties = []
@@ -1241,6 +1260,8 @@ def plot_participant_RT_hist(data, data_cleaned,report,id):
     ax2.set_xlabel('RT (ms)')
     ax2.set_ylabel('Frequency')
     report.add_figure(fig=fig, title='RT_hist', section=id, tags=['histogram'],replace=True)
+    report.save(cfg.rt_report_savename_hdf5, verbose=False, overwrite=True)
+
     plt.close('all')
 
 def plot_RT(data,report,id):
@@ -1264,6 +1285,8 @@ def plot_RT(data,report,id):
     ax.set_ylabel('Median RT (ms)')
     ax.set_xlabel('Difficulty')
     report.add_figure(fig=fig, title='RTs', section=id, tags=['line_plot'],replace=True)
+    report.save(cfg.rt_report_savename_hdf5, verbose=False, overwrite=True)
+
     plt.close('all')
 
 
@@ -1350,16 +1373,22 @@ def inverse_from_prestimulus_baseline(participant,all_epochs,evoked, visit_dir,r
     fwd = mne.read_forward_solution(fwd_fname)
 
     #compute covariance from baseline
-    noise_cov = mne.compute_covariance(all_epochs.apply_baseline(cfg.prestimulus_baseline), tmax=0, method = "auto",rank = None)
     cov_fname = fwd_fname.replace('_run01_fwd.fif','_prestim_baseline_cov.fif')
-    mne.write_cov(cov_fname, noise_cov, overwrite=overwrite)
+    if not os.path.exists(cov_fname) or overwrite:
+        noise_cov = mne.compute_covariance(all_epochs.apply_baseline(cfg.prestimulus_baseline), tmax=0, method = "auto",rank = None)
+        mne.write_cov(cov_fname, noise_cov, overwrite=overwrite)
+    else:
+        noise_cov = mne.read_cov(cov_fname)
+        msg = 'Covariance already exists. Using existing covariance.'
+        print(msg)
     report.add_covariance(cov = cov_fname,info = all_epochs.info,title = participant + ' Covariance from prestimulus baseline',replace = True)
     report.add_evokeds(evoked,titles = participant + ' Evoked from prestimulus baseline',noise_cov = noise_cov,replace = True)
     report.save(cfg.inv_report_savename_hdf5, verbose=False, overwrite=overwrite)
     #compute inverse operator
     inv_fname = fwd_fname.replace('_run01_fwd.fif','_prestim_baseline_inv.fif')
-    inv_operator  = mne.minimum_norm.make_inverse_operator(all_epochs.info, fwd, noise_cov, loose=0.2, depth=0.8, rank='info')
-    mne.minimum_norm.write_inverse_operator(inv_fname,inv_operator,overwrite=overwrite)
+    if not os.path.exists(inv_fname) or overwrite:
+        inv_operator  = mne.minimum_norm.make_inverse_operator(all_epochs.info, fwd, noise_cov, loose=0.2, depth=0.8, rank='info')
+        mne.minimum_norm.write_inverse_operator(inv_fname,inv_operator,overwrite=overwrite)
 
 def add_whitened_evoked_erm(participant,visit_dir,evoked,report):
     erm_cov_fname = find_files(participant + '_erm_cov.fif', visit_dir)

@@ -12,7 +12,7 @@ participants_df, participants_to_study = tlbx.load_participants()
 # participants_to_study = ['114001','114501','032901','042203','106501','108201','133101','132901']
 
 src_to = mne.read_source_spaces('/local_mount/space/hypatia/2/users/Jasmine/MNE-sample-data/subjects/fsaverage/bem/fsaverage-ico-5-src.fif')
-data_savename = '/local_mount/space/hypatia/2/users/Jasmine/AttenVis/analyses/activations/pop_out_minus_search/subtracted_stcs.pkl'
+data_savename = '/local_mount/space/hypatia/2/users/Jasmine/AttenVis/analyses/activations/search_minus_pop-out/response_subtracted_stcs.pkl'
 # morph_files = tlbx.find_files('_morph.h5',cfg.data_dir)
 # Subtract pop-out from search for each participant
 subj_stcs = {}
@@ -42,7 +42,7 @@ if not os.path.exists(data_savename): # or cfg.add_participants  or cfg.overwrit
             stc = mne.minimum_norm.apply_inverse(baseline_evoked, inverse_operator, cfg.lambda2, method=cfg.con_method, pick_ori=None, verbose=True)
             subj_stcs[condition] = stc
 
-        subtracted_stc = subj_stcs['pop-out'] - subj_stcs['search']
+        subtracted_stc = subj_stcs['search'] - subj_stcs['pop-out']
         morphed_stc = morph.apply(subtracted_stc)
         data = [sub_id,diagnosis,study,'pop-out-search',subtracted_stc,morphed_stc]
         subtracted_stcs.append(data)

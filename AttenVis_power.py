@@ -18,23 +18,18 @@ from matplotlib.gridspec import GridSpec
 import helper_functions as tlbx
 import AttenVis_config as cfg
 
-participants_df, participants_to_study = tlbx.load_participants(cfg.participants_csv)
+participants_df, participants_to_study = tlbx.load_participants()
+report = tlbx.generate_report()
 
-participants_to_study = ['113301','111401','114001','114501','032901','042203','106201','104101']
-# if cfg.add_participants:
-#     participants_to_study = tlbx.update_participants(cfg.data_savename,participants_to_study)
-# # participants_to_study = ['148501']
-all_participants = []
-if not os.path.exists(cfg.data_savename) or cfg.overwrite_data or cfg.add_participants:
+if cfg.overwrite_data:
     for sub_id in participants_to_study:
-        diagnosis, study,visit_dir,subjID_date = tlbx.get_participant_details(participants_df,sub_id)
-        #load inverse operator
-        inv_path = tlbx.find_files('_inv.fif',visit_dir)[0]
-        inverse_operator = mne.minimum_norm.read_inverse_operator(inv_path)
-        src = inverse_operator["src"] 
+        participant_data = []
+        diagnosis, study,visit_dir,subjID_date = tlbx.read_participant_details_from_dataframe(participants_df,sub_id)
+        participant_data_savename = os.path.join(visit_dir,cfg.data_fname.replace('.pkl','_' + sub_id + '.pkl'))
+        inverse_operator = tlbx.load_inverse_operator('_prestim_baseline_inv.fif',visit_dir)
         
         for condition in cfg.brain_selected_conditions:
-            file_tag_cond = '_nobaseline_nofilter_' + condition.replace('/','_') 
+            file_tag_cond = '_AttenVis_nobaseline_nofilter_' + condition.replace('/','_') 
             epo_load_fname = tlbx.find_files(file_tag_cond + '_clean_epo.fif',visit_dir)[0]
             print(epo_load_fname)
             epochs = mne.read_epochs(epo_load_fname)
@@ -42,7 +37,7 @@ if not os.path.exists(cfg.data_savename) or cfg.overwrite_data or cfg.add_partic
 
             for hemi in cfg.hemisphere:
                 #load_labels 
-                annot_label = tlbx.load_drawn_labels(cfg.labels_of_interest,hemi,subjID_date,cfg.subj_dir,grown=True)
+                annot_label = tlbx.load_drawn_labels(cfg.labels_of_interest,hemi,subjID_date,visit_dir,grown=True)
                 #get power and itc
                 power, itc = mne.minimum_norm.source_induced_power(
                     epochs,
@@ -62,42 +57,21 @@ if not os.path.exists(cfg.data_savename) or cfg.overwrite_data or cfg.add_partic
                 #                         progress_bar=False)        
                 # estimator.fit(stc_label)
                 data = [diagnosis,sub_id,study,condition,hemi,cfg.labels_of_interest[0],np.mean(power,axis=0),itc,annot_label,epochs.times]
-                all_participants.append(data)
-    df= pd.DataFrame(all_participants, columns = ['Diagnosis','Participant','Study','Condition','hemisphere','label','power','itc','grown_label','time']) 
-    if cfg.add_participants:
-        old_df = pd.read_pickle(cfg.data_savename)
-        add_to_df = pd.concat([old_df,df])
-        add_to_df = add_to_df.sort_values(by='Participant')
-        df = add_to_df
+                participant_data.append(data)
+        df_participant = pd.DataFrame(participant_data,columns=['Diagnosis','Participant','Study','Condition','hemisphere','label','power','itc','grown_label','time'])
+        df_participant.to_pickle(participant_data_savename)
+        tlbx.add_participant_tfrs_to_report(df_participant,report,sub_id)
 
-    df.to_pickle(cfg.data_savename)
-else: 
-    df = pd.read_pickle(cfg.data_savename)
 
-#open report if it exists 
-if os.path.exists(cfg.report_savename_hdf5):
-    report = mne.open_report(cfg.report_savename_hdf5)
-else:
-    report = mne.Report(title=cfg.report_title)
+df = tlbx.collate_participants_data(participants_df,participants_to_study)
 
-exclude_participants = [] 
-tlbx.update_participants_n(participants_df,exclude_participants,'all')
-for sub_id in participants_to_study:
-    df_participant = df[df["Participant"]==sub_id]
-    tlbx.add_participant_tfrs_to_report(df_participant,report,sub_id)
-
-# for study in cfg.study:
-#     df_study = df[df["Study"]==study]
-#     tlbx.add_tfrs_to_report(df_study,report,study,cfg.diagnoses['misophonia'][study],cfg.diagnoses['td'][study])
 mpl.rcParams["svg.fonttype"] = "none"
 
 tlbx.add_tfrs_to_report(df,report,'gavg',cfg.diagnoses['asd']['label_n'],cfg.diagnoses['td']['label_n'])
-tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Diagnosis',(8,13),ci=False)
-tlbx.add_fsaverage_to_report(report,df,cfg.labels_of_interest[0] + '_grown')
-# exclude_participants = ['147401','146201','151101','150901'] #'147401','146201',
-# removed_participants = df['Participant'].isin(exclude_participants)
-# df = df[~removed_participants]
-# participants_used = tlbx.update_participants_n(participants_df,exclude_participants,'all')
+tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Diagnosis',(4,8),ci=False)
+tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Condition',(4,8),ci=False)
 
-report.save(cfg.report_savename_html, overwrite=True)
-report.save(cfg.report_savename_hdf5, overwrite=True)
+# tlbx.add_fsaverage_to_report(report,df,cfg.labels_of_interest[0] + '_grown')
+
+tlbx.show_report(cfg.report_savename_hdf5)
+

@@ -4,7 +4,7 @@ import matplotlib as plt
 
 local_dir = '/local_mount/space/hypatia/2/users/Jasmine/'
 paradigm = 'AttenVis'
-analysis_type = 'activations'
+analysis_type = 'power'
 if paradigm == 'Misophonia_ASD_TD':
     data_dir = os.path.join(local_dir, 'Misophonia',paradigm)
 else:
@@ -12,17 +12,19 @@ else:
 savedir = os.path.join(data_dir,'analyses',analysis_type)
 
 #experiment details 
-condition = {'target': {'label':'Target'},
-            'search/4': {'label':'Search 4'},
-            'search/6': {'label':'Search 6'},
-            'search/8': {'label':'Search 8'},
-            'search/10': {'label':'Search 10'},
-            'pop-out/4': {'label':'Pop-out 4'},   
-            'pop-out/6': {'label':'Pop-out 6'},
-            'pop-out/8': {'label':'Pop-out 8'},
-            'pop-out/10': {'label':'Pop-out 10'}
-             } #put the condition you want the label drawn in first
+# condition = {'target': {'label':'Target'},
+#             'search/4': {'label':'Search 4'},
+#             'search/6': {'label':'Search 6'},
+#             'search/8': {'label':'Search 8'},
+#             'search/10': {'label':'Search 10'},
+#             'pop-out/4': {'label':'Pop-out 4'},   
+#             'pop-out/6': {'label':'Pop-out 6'},
+#             'pop-out/8': {'label':'Pop-out 8'},
+#             'pop-out/10': {'label':'Pop-out 10'}
+#              } #put the condition you want the label drawn in first
 
+condition = {'search': {'label':'Search'},
+             'pop-out': {'label':'Pop-out'}}
 plot_selected_conditions = ['search','pop-out']
 brain_selected_conditions = ['search','pop-out']
 diagnoses = {'asd':{'label':'ASD'},
@@ -33,11 +35,11 @@ study = ['MisoNat','MisoNat2']
 sensor_hemis = ['left','right']
 hemisphere = ['lh','rh']
 labels_of_interest = ['V1']
-brain_view = 'medial'
+brain_view = 'caudal'
 
-time_windows = [-0.5,2.5]
-metadata_timewindow = [0.0,5.0]#[-1.5,0.0]
-prestimulus_baseline = (-0.2, 0.0)
+time_windows = [-1.5,0.5]
+metadata_timewindow = [-5.0,0.0] #stim: [0.0,5.0]
+prestimulus_baseline = (0.3, 0.5)
 
 peak_time_window = [0.9,1.2]
 peak_times_hemis = {key: {key:None for key in hemisphere} for key in hemisphere}
@@ -54,6 +56,9 @@ tmin_plot = -0.3
 tmax_plot = 1.5
 freq_min = 4
 freq_max = 80
+freq_min_plot = 4
+freq_max_plot = 40
+power_line_plot_ylims = (-0.2,0.3)
 con_method = "dSPM"
 fc_method = 'coh'
 fc_mode = 'cwt_morlet'
@@ -118,7 +123,7 @@ else:
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
-save_fname = '_'.join(selected_conditions + labels_of_interest + [con_method]+[str(time_windows[0]),str(time_windows[1])])
+save_fname = '_'.join(selected_conditions + labels_of_interest + [con_method]+[str(time_windows[0]),str(time_windows[1])]) #[analysis_type] + 
 data_fname = save_fname + '.pkl'
 data_savename = os.path.join(output_dir,data_fname)
 report_savename_html = os.path.join(output_dir,save_fname+brain_view + ".html")
@@ -134,8 +139,9 @@ connectivity_compare_data_savename = os.path.join(output_dir,connectivity_compar
 con_report_savename_html = os.path.join(output_dir,connectivity_save_fname+".html")
 con_report_savename_hdf5 = os.path.join(output_dir,connectivity_save_fname+".hdf5")
 
-inv_report_savename_hdf5 = os.path.join(data_dir,'_'.join([str(prestimulus_baseline[0]),str(prestimulus_baseline[1]),"prestim_inverses_stimulis.hdf5"]))
-rt_report_savename_hdf5 = os.path.join(data_dir,"RTs.hdf5")
+inv_report_savename_hdf5 = os.path.join(data_dir,'_'.join([str(prestimulus_baseline[0]),str(prestimulus_baseline[1]),"prestim_inverses_responses.hdf5"]))
+rt_report_savename_hdf5 = os.path.join(data_dir,"RTs_all_answers.hdf5")
+rt_data_savename = os.path.join(data_dir,"RTs_all_answers.pkl")
 
 
 report_title = '_'.join(list(condition.keys()) + labels_of_interest + [con_method])
