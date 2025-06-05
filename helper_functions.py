@@ -101,7 +101,7 @@ def get_participant_details(participants_df,sub_id):
         subjID_date = '148501_20250224'
     else:
         subjID_date = find_mri_recons(cfg.subj_dir,sub_id,visit_date)
-    return diagnosis, study,visit_dir,subjID_date
+    return diagnosis,study,visit_dir,subjID_date
 
 def read_participant_details_from_dataframe(participants_df,sub_id):
     visit_dir = participants_df[participants_df['Participant'] == sub_id]['Visit_Dir'].values[0]
@@ -277,7 +277,10 @@ def load_annot_labels(labels_list,subjID_date,parc,hemi,subj_dir):
     If you want them in separate labels, run in a loop through. 
     """
     aparc_differences = ['G_Ins_lg&S_cent_ins','G_Ins_lg_and_S_cent_ins',
-                        'S_intrapariet&P_trans','S_intrapariet_and_P_trans']
+                        'S_intrapariet&P_trans','S_intrapariet_and_P_trans',
+                        'G&S_cingul-Ant', 'G&S_cingul-Mid-Ant','G&S_cingul-Mid-Post',
+                        'G_and_S_cingul-Ant', 'G_and_S_cingul-Mid-Ant','G_and_S_cingul-Mid-Post'
+                        ]
     
     def check_other_naming_convention(label_name):
         if '_and_' in label_name:
@@ -339,14 +342,16 @@ def show_report(report_name):
     else:
         raise TypeError('ERROR: No report found in paradgm directory')
 
-def find_peak_grow_label(stc,hemi,tmin,tmax,label_size,subjID_date,peak_type,file_location):
-    peak_vertex,peak_time = stc.get_peak(hemi = hemi, tmin = tmin,tmax = tmax)
+def find_peak_grow_label(stc,hemi,tmin,tmax,label_size,subjID_date,peak_type,file_location,mode = 'abs'):
+    peak_vertex,peak_time = stc.get_peak(hemi = hemi, tmin = tmin,tmax = tmax,mode = mode)
     if hemi == 'lh':
         hemis = 0
     elif hemi == 'rh':
         hemis = 1
     if peak_type == 'coh':
         annot_label = mne.grow_labels(subjID_date,peak_vertex,label_size,hemis,subjects_dir = cfg.subj_dir,names=[cfg.labels_of_interest[0] + '_coh_' + hemi + '_grown'])[0]
+    elif peak_type == 'diff':
+        annot_label = mne.grow_labels(subjID_date,peak_vertex,label_size,hemis,subjects_dir = cfg.subj_dir,names=[cfg.labels_of_interest[0] + '_diff_' + hemi + '_grown'])[0]  
     else:
         annot_label = mne.grow_labels(subjID_date,peak_vertex,label_size,hemis,subjects_dir = cfg.subj_dir,names=[cfg.labels_of_interest[0] + '_grown'])[0]
     label_fname = os.path.join(file_location,'_'.join([subjID_date.split('_')[0],annot_label.name + '.label']))
@@ -747,7 +752,7 @@ def plot_line(df,variable,ax,label,color,freqs = None,ci=False,group=False):
 
     return ax
 
-def plot_activations(df,plot_title,tag,factor,factor_name_in_df,group=False,ci=False):
+def plot_activations(df,plot_title,tag,factor,factor_name_in_df,group=False,ci=False,add_vlines = None):
     #plot activations in time window
     SMALL_SIZE = 22
     plt.rcParams["font.family"] = "Arial"
@@ -764,6 +769,9 @@ def plot_activations(df,plot_title,tag,factor,factor_name_in_df,group=False,ci=F
     sub_ax1.set_xlabel('Time (s)',fontsize=cfg.fontsize)
     sub_ax1.set_ylabel('dSPM activation (AU)',fontsize=cfg.fontsize)
     sub_ax1.axvline(x=0, ls='--', color='k')
+    if add_vlines is not None:
+        for vline in add_vlines:
+            sub_ax1.axvline(x=vline, ls='--', color='k')
 
     title = plot_title + tag + ' \n '
     sub_ax1.set_title(title,fontsize=16)
@@ -780,7 +788,7 @@ def add_participant_activations_to_report(df,report,id):
         df_hemi = df[df["hemisphere"]==hemi]
         hemi_tag = ' (' + hemi.upper() + ')'
         #plot time series activations   
-        fig1,filename= plot_activations(df_hemi,'Activations from ',df['Participant'].values[0] + hemi_tag,cfg.plot_selected_conditions,'Condition', group=False)
+        fig1,filename= plot_activations(df_hemi,'Activations from ',df['Participant'].values[0] + hemi_tag,cfg.plot_selected_conditions,'Condition', group=False,add_vlines=cfg.vlines)
         fig = plt.figure(figsize=(18,6), layout='constrained')
         gs  = GridSpec(1, 3, figure=fig) 
         ax1 = fig.add_subplot(gs[0,0])
@@ -806,7 +814,7 @@ def add_gavg_activations_to_report(df,report,id,grouping_factor,factor_name_in_d
             hemi_tag = ' (' + hemi.upper() + ')'
             df_to_plot = df[(df[factor_name_in_df] == factor_level) & (df['hemisphere'] == hemi)]
             if factor_name_in_df == 'Diagnosis':
-                fig1,filename= plot_activations(df_to_plot,'Activations from ',factor_level + hemi_tag,cfg.plot_selected_conditions,'Condition',group=True,ci = True)
+                fig1,filename= plot_activations(df_to_plot,'Activations from ',factor_level + hemi_tag,cfg.plot_selected_conditions,'Condition',group=True,ci = True,add_vlines=cfg.vlines)
             elif factor_name_in_df == 'Condition':
                 fig1,filename= plot_activations(df_to_plot,'Activations from ',factor_level + hemi_tag,cfg.diagnoses,'Diagnosis',group=True,ci = True)
             filenames_hemis.update({hemi:filename})
@@ -967,6 +975,7 @@ def plot_power_over_time(ax,df,tag,factor_name_in_df,freqs,group=False,highlight
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.axvline(x=0, ls='--', color='k')
+    ax.axvline(x=0.8, ls='--', color='k')
     if highlight_area:
         ax.axvline(x=area_time_window[0], ls='--', color='k')
         ax.axvline(x=area_time_window[1], ls='--', color='k')
@@ -1161,22 +1170,36 @@ def attenvis_metadata(events,sfreq,mat_file,participant,locked_to = 'stimuli'):
     error_log = []
     if locked_to == 'response':
         row_events = [ "response/left","response/right"]
+        keep_last = ["condition"]
+        metadata_tmax = ["condition/search/4", "condition/search/6", "condition/search/8", "condition/search/10","condition/pop-out/4", "condition/pop-out/6", "condition/pop-out/8", "condition/pop-out/10"]
+        metadata, events_meta, event_id_meta = mne.epochs.make_metadata(
+            events=events,
+            event_id=cfg.event_dict,
+            tmin=metadata_tmax,
+            tmax= row_events,
+            sfreq=sfreq,
+            row_events=row_events,
+            keep_last=keep_last,
+        )  
+        metadata[['Condition','difficulty']] = metadata['last_condition'].str.split('/',expand = True)
+        metadata['RT'] = metadata['condition'] #this will get RT as a negative number because it is counting backwards from the response, but you shouldn't rely on this metadata for calculating RTs. Only calculate RTs with stimuli_locked epochs.
 
     else:
         row_events = ["target"]
+        keep_first = ["condition","response"]
+        metadata_tmax = ["response/left", "response/right"]
 
-    keep_first = ["condition","response"]
-    metadata, events_meta, event_id_meta = mne.epochs.make_metadata(
-        events=events,
-        event_id=cfg.event_dict,
-        tmin=cfg.metadata_timewindow[0],
-        tmax=cfg.metadata_timewindow[1],
-        sfreq=sfreq,
-        row_events=row_events,
-        keep_first=keep_first,
-    )  
-    metadata[['Condition','difficulty']] = metadata['first_condition'].str.split('/',expand = True)
-    metadata['RT'] = metadata['response'] - metadata['condition']
+        metadata, events_meta, event_id_meta = mne.epochs.make_metadata(
+            events=events,
+            event_id=cfg.event_dict,
+            tmin=None,
+            tmax=metadata_tmax,
+            sfreq=sfreq,
+            row_events=row_events,
+            keep_first=keep_first,
+        )  
+        metadata[['Condition','difficulty']] = metadata['first_condition'].str.split('/',expand = True)
+        metadata['RT'] = metadata['response'] - metadata['condition']
     metadata.reset_index(drop=True,inplace=True)
     metadata = metadata.drop(columns=['condition/search/4','condition/search/6','condition/search/8','condition/search/10','condition/pop-out/4','condition/pop-out/6','condition/pop-out/8','condition/pop-out/10','target','response/right','response/left'])
     try: 
@@ -1195,8 +1218,10 @@ def attenvis_metadata(events,sfreq,mat_file,participant,locked_to = 'stimuli'):
         metadata['correct'] = mat['correctTrials'][0][8:]
     elif os.path.split(mat_file)[1] == '086901_AttenVis_run03_behaviour.mat':
         metadata['correct'] = mat['correctTrials'][0][5:]
-    elif os.path.split(mat_file)[1] == '098101_AttenVis_run01_behaviour.mat':
+    elif os.path.split(mat_file)[1] == '098101_AttenVis_run01_behaviour.mat' and locked_to == 'stimuli':
         metadata['correct'] = mat['correctTrials'][0][:-2]
+    elif os.path.split(mat_file)[1] == '098101_AttenVis_run01_behaviour.mat' and locked_to == 'response':
+        metadata['correct'] = mat['correctTrials'][0][:-3]
     elif os.path.split(mat_file)[1] == '101901_AttenVis_run01_behaviour.mat':
         metadata['correct'] = mat['correctTrials'][0][4:]  
     elif os.path.split(mat_file)[1] == '109101_AttenVis_run03_behaviour.mat':
@@ -1221,7 +1246,7 @@ def attenvis_metadata(events,sfreq,mat_file,participant,locked_to = 'stimuli'):
             writer.writerow([participant,msg])
     return metadata, events_meta, event_id_meta
 
-def clean_metadata(dataset,percent,correct_answers_only = False):
+def clean_metadata(dataset,rt_based = None, percent = None,correct_answers_only = False):
     difficulty_order = ['4','6','8','10']
     dataset['difficulty'] = pd.Categorical(dataset['difficulty'], categories=difficulty_order, ordered=True)
     condition_order = ['pop-out','search']
@@ -1233,17 +1258,58 @@ def clean_metadata(dataset,percent,correct_answers_only = False):
             correct_answers = dataset.loc[dataset['correct']==1,:]
     else:
         correct_answers = dataset
-    correct_answers_lower_bound = correct_answers.loc[correct_answers["RT"]>0.1]
-    convert_percent = 1-percent
-    all_conditions_difficulties = []
-    for level in difficulty_order:
-        for condition in condition_order:
-            correct_answers_condition_difficulty = correct_answers_lower_bound.loc[(correct_answers_lower_bound['difficulty'] == level) & (correct_answers_lower_bound['Condition'] == condition)]
-            percent_cutoff = correct_answers_lower_bound["RT"].quantile(convert_percent)
-            correct_answers_cleaned = correct_answers_lower_bound.loc[correct_answers_lower_bound["RT"]<percent_cutoff]
-            all_conditions_difficulties.append(correct_answers_condition_difficulty)
-    correct_answers_cleaned = pd.concat(all_conditions_difficulties).sort_index()
-    return correct_answers_cleaned
+    if rt_based:
+        correct_answers_lower_bound = correct_answers.loc[(correct_answers["RT"] < rt_based[1]) & (correct_answers["RT"]> rt_based[0])] #usually 100ms, so 0.1 
+    else: 
+        correct_answers_lower_bound = correct_answers.loc[correct_answers["RT"]>0.1] # will always remove improbable responses, usually 100ms, so 0.1 
+    if percent:  
+        convert_percent = 1-percent
+        all_conditions_difficulties = []
+        for level in difficulty_order:
+            for condition in condition_order:
+                correct_answers_condition_difficulty = correct_answers_lower_bound.loc[(correct_answers_lower_bound['difficulty'] == level) & (correct_answers_lower_bound['Condition'] == condition)]
+                percent_cutoff = correct_answers_lower_bound["RT"].quantile(convert_percent)
+                correct_answers_cleaned = correct_answers_lower_bound.loc[correct_answers_lower_bound["RT"]<percent_cutoff]
+                all_conditions_difficulties.append(correct_answers_condition_difficulty)
+        correct_answers_cleaned = pd.concat(all_conditions_difficulties).sort_index()
+    else:
+        correct_answers_cleaned = correct_answers_lower_bound
+    summary = correct_answers_cleaned.groupby(['Condition', 'difficulty']).size().reset_index(name='count')
+
+    return correct_answers_cleaned,summary
+
+def clean_epochs_by_behaviour(epochs,rt_based=None, percent=None, correct_answers_only=False):
+    difficulty_order = ['4','6','8','10']
+    epochs.metadata['difficulty'] = pd.Categorical(epochs.metadata['difficulty'], categories=difficulty_order, ordered=True)
+    condition_order = ['pop-out','search']
+    epochs.metadata['Condition'] = pd.Categorical(epochs.metadata['Condition'], categories=condition_order, ordered=True)
+    if correct_answers_only:
+        if epochs.metadata['correct'].isnull().all():
+            print('no column for correct answers in metadata')
+        else:
+            correct_answers = epochs[('correct == 1 ')]
+    else:
+        correct_answers = epochs
+    if rt_based:
+        rt_mask = (correct_answers.metadata['RT'] > rt_based[0]) & (correct_answers.metadata['RT'] < rt_based[1])
+        correct_answers_lower_bound = correct_answers[rt_mask.to_numpy()]
+    else: 
+        correct_answers_lower_bound = correct_answers[('RT>0.1')] # will always remove improbable responses, usually 100ms, so 0.1 
+    if percent:  
+        convert_percent = 1-percent
+        all_conditions_difficulties = []
+        for level in difficulty_order:
+            for condition in condition_order:
+                correct_answers_condition_difficulty = correct_answers_lower_bound.loc[(correct_answers_lower_bound['difficulty'] == level) & (correct_answers_lower_bound['Condition'] == condition)]
+                percent_cutoff = correct_answers_lower_bound["RT"].quantile(convert_percent)
+                correct_answers_cleaned = correct_answers_lower_bound.loc[correct_answers_lower_bound["RT"]<percent_cutoff]
+                all_conditions_difficulties.append(correct_answers_condition_difficulty)
+        correct_answers_cleaned = pd.concat(all_conditions_difficulties).sort_index()
+    else:
+        correct_answers_cleaned = correct_answers_lower_bound
+    summary = correct_answers_cleaned.metadata.groupby(['Condition', 'difficulty']).size().reset_index(name='count')
+
+    return correct_answers_cleaned, summary
 
 def plot_participant_RT_hist(data, data_cleaned,report,id):
     fig = plt.figure(figsize=(10,4.8), layout='constrained')
@@ -1288,7 +1354,6 @@ def plot_RT(data,report,id):
     report.save(cfg.rt_report_savename_hdf5, verbose=False, overwrite=True)
 
     plt.close('all')
-
 
 def find_response_triggers(events):
     events_data = pd.DataFrame(events)
@@ -1383,7 +1448,7 @@ def inverse_from_prestimulus_baseline(participant,all_epochs,evoked, visit_dir,r
         print(msg)
     report.add_covariance(cov = cov_fname,info = all_epochs.info,title = participant + ' Covariance from prestimulus baseline',replace = True)
     report.add_evokeds(evoked,titles = participant + ' Evoked from prestimulus baseline',noise_cov = noise_cov,replace = True)
-    report.save(cfg.inv_report_savename_hdf5, verbose=False, overwrite=overwrite)
+    report.save(cfg.inv_report_savename_hdf5, verbose=False, overwrite=True)
     #compute inverse operator
     inv_fname = fwd_fname.replace('_run01_fwd.fif','_prestim_baseline_inv.fif')
     if not os.path.exists(inv_fname) or overwrite:
@@ -1412,7 +1477,7 @@ def draw_label_from_epochs(visit_dir,subjID_date,epochs,inverse_operator,label_t
     #load epochs and get evoked
     epochs_clean = get_condition_epochs(epochs.copy(),condition = None)
     baseline_evoked = get_evoked(epochs_clean,filter=filter,baseline=cfg.baseline)
-    stc = mne.minimum_norm.apply_inverse(baseline_evoked, inverse_operator, cfg.lambda2, method=cfg.con_method, pick_ori=None, verbose=True)
+    stc = mne.minimum_norm.apply_inverse(baseline_evoked, inverse_operator, cfg.lambda2, method=cfg.con_method, pick_ori=None, verbose=False)
     
     for hemi in cfg.hemisphere:
         #load_labels
@@ -1427,12 +1492,39 @@ def draw_label_from_epochs(visit_dir,subjID_date,epochs,inverse_operator,label_t
         cfg.peak_morphed_labels_hemis.update({hemi:morphed_label})
         cfg.peak_times_hemis.update({hemi:peak_time})
 
+def draw_label_from_stc(visit_dir,subjID_date,stc,label_to_draw_from = 'fs_drawn',mode = 'abs'):
+    for hemi in cfg.hemisphere:
+        #load_labels
+        if label_to_draw_from == 'fs_drawn': 
+            annot_label = morph_fslabel(cfg.labels_list[0],subjID_date,hemi)[0]
+        elif label_to_draw_from == 'annot':
+            parc = 'aparc.a2009s'
+            annot_label = load_annot_labels(cfg.labels_list,subjID_date,parc,hemi,cfg.subj_dir)
+        stc_from_annot_label = stc.in_label(annot_label)
+        grown_label,morphed_label,label_fname,peak_time = find_peak_grow_label(stc_from_annot_label,hemi,cfg.peak_time_window[0],cfg.peak_time_window[1],5,subjID_date,'diff',visit_dir,mode=mode)
+        cfg.peak_labels_hemis.update({hemi:grown_label})
+        cfg.peak_morphed_labels_hemis.update({hemi:morphed_label})
+        cfg.peak_times_hemis.update({hemi:peak_time})
+
+def save_peak_times(peak_times):
+    peak_times_df = pd.DataFrame.from_dict(peak_times,orient='index')
+    peak_times_df.index.name = 'Participant'
+    peak_times_df.to_csv(cfg.peak_times_savename,index=True)
+
 def load_epochs(file_tag,visit_dir,resample=False):
     load_fname = find_files(file_tag,visit_dir)[0]
     epochs = mne.read_epochs(load_fname)
     if resample:
         epochs   = epochs.resample(cfg.sfreq)
     return load_fname, epochs
+def load_stc(file_tag,visit_dir,filter=None):
+    #load stc
+    stc_path = find_files(file_tag,visit_dir)[0] 
+    stc = mne.read_source_estimate(stc_path)
+    stc._data = stc._data.astype('float64') #convert to float32 to save memory
+    if filter:
+        stc = stc.filter(filter[0],filter[1],verbose=True)
+    return stc_path,stc
 def load_inverse_operator(file_tag,visit_dir):
     #load inverse operator
     inv_path = find_files(file_tag,visit_dir)[0] 

@@ -12,7 +12,7 @@ participants_df, participants_to_study = tlbx.load_participants()
 # participants_to_study = ['114001','114501','032901','042203','106501','108201','133101','132901']
 
 src_to = mne.read_source_spaces('/local_mount/space/hypatia/2/users/Jasmine/MNE-sample-data/subjects/fsaverage/bem/fsaverage-ico-5-src.fif')
-data_savename = '/local_mount/space/hypatia/2/users/Jasmine/AttenVis/analyses/activations/search_minus_pop-out/response_subtracted_stcs.pkl'
+data_savename = '/local_mount/space/hypatia/2/users/Jasmine/AttenVis/analyses/activations/search_minus_pop_out/response_subtracted_stcs.pkl'
 # morph_files = tlbx.find_files('_morph.h5',cfg.data_dir)
 # Subtract pop-out from search for each participant
 subj_stcs = {}
@@ -34,17 +34,25 @@ if not os.path.exists(data_savename): # or cfg.add_participants  or cfg.overwrit
             morph.save(morph_fname)
         else:
             morph = mne.read_source_morph(morph_fname)
+        load_fname, epochs = tlbx.load_epochs('_nobaseline_nofilter_all_conditions_metadata_response_epo.fif',visit_dir,resample=True)
 
         for condition in cfg.brain_selected_conditions:
-            epochs_fname = tlbx.find_files('_AttenVis_nobaseline_nofilter_'+ condition +'_clean_epo.fif',visit_dir)
-            epochs_clean = mne.read_epochs(epochs_fname[0],preload=True)
-            baseline_evoked = tlbx.get_evoked(epochs_clean,filter=(1,30),baseline=cfg.baseline)
+            condition_tag = "(Condition == '" + condition + "')"
+            out_fname = load_fname.replace('all_conditions_metadata_response_epo.fif','_'.join([condition.replace('/','_'),'response','clean','epo.fif']))
+            if not os.path.exists(out_fname) or cfg.overwrite_epochs:
+                epochs_clean = tlbx.get_condition_epochs(epochs,condition_tag)
+                epochs_clean.save(out_fname) #always saves epochs with bad epochs removed but without any filtering or baseline correction
+            else:
+                epochs_clean = mne.read_epochs(out_fname)
+            baseline_evoked = tlbx.get_evoked(epochs_clean,filter=None,baseline=cfg.baseline)
             stc = mne.minimum_norm.apply_inverse(baseline_evoked, inverse_operator, cfg.lambda2, method=cfg.con_method, pick_ori=None, verbose=True)
             subj_stcs[condition] = stc
 
         subtracted_stc = subj_stcs['search'] - subj_stcs['pop-out']
+        subtracted_stc.subject = subjID_date
+        subtracted_stc.save(os.path.join(visit_dir,sub_id + '_search_minus_pop-out_stc.fif'),overwrite=True)
         morphed_stc = morph.apply(subtracted_stc)
-        data = [sub_id,diagnosis,study,'pop-out-search',subtracted_stc,morphed_stc]
+        data = [sub_id,diagnosis,study,'search-pop-out',subtracted_stc,morphed_stc]
         subtracted_stcs.append(data)
 
     # Save it in a dataframe
@@ -55,16 +63,16 @@ else:
 # Average within each group
 for diagnosis in cfg.diagnoses:
     group_average = df[df['Diagnosis'] == diagnosis]['Morphed_stc'].values.mean(axis=0)
-    brain = group_average.plot(
+    brain = group_average.savgol_filter(30).plot(
         subjects_dir='/autofs/space/transcend/MRI/WMA/recons/',
-        hemi='both',
-        initial_time=1.00,
-        clim=dict(kind="values", lims=[-0.4,0.05,0.6]), #99.5, 99.7, 99.9
+        hemi='lh',
+        initial_time=0.0,
+        clim=dict(kind="values", lims=[-0.2,0.05,0.2]), #99.5, 99.7, 99.9
         colormap='bwr',
         smoothing_steps=7,
-        views = cfg.brain_view,
+        views = 'medial',
         time_viewer = True
         )
 
 # Plot the resulting stc onto the fsaverage
-group_average.plot(subject='fsaverage')
+# group_average.plot(subject='fsaverage')

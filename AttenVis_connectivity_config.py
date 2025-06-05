@@ -4,7 +4,7 @@ import matplotlib as plt
 
 local_dir = '/local_mount/space/hypatia/2/users/Jasmine/'
 paradigm = 'AttenVis'
-analysis_type = 'activations' 
+analysis_type = 'connectivity' 
 if paradigm == 'Misophonia_ASD_TD':
     data_dir = os.path.join(local_dir, 'Misophonia',paradigm)
 else:

@@ -68,8 +68,8 @@ df = tlbx.collate_participants_data(participants_df,participants_to_study)
 mpl.rcParams["svg.fonttype"] = "none"
 
 tlbx.add_tfrs_to_report(df,report,'gavg',cfg.diagnoses['asd']['label_n'],cfg.diagnoses['td']['label_n'])
-tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Diagnosis',(4,8),ci=False)
-tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Condition',(4,8),ci=False)
+tlbx.add_gavg_power_over_time_to_report(df,report,'gavg_alpha','Diagnosis',(8,12),ci=False)
+tlbx.add_gavg_power_over_time_to_report(df,report,'gavg_alpha','Condition',(8,12),ci=False)
 
 # tlbx.add_fsaverage_to_report(report,df,cfg.labels_of_interest[0] + '_grown')
 
