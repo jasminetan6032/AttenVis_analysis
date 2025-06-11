@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import matplotlib as plt
 
-local_dir = '/local_mount/space/hypatia/2/users/Jasmine/'
+local_dir = '/autofs/space/hypatia_002/users/Jasmine/'
 paradigm = 'AttenVis'
 analysis_type = 'power' 
 if paradigm == 'Misophonia_ASD_TD':
@@ -29,14 +29,14 @@ sensor_hemis = ['left','right']
 hemisphere = ['lh','rh']
 
 #what you're investigating: label, view of label and whether to use stimuli-locked or response-locked epochs
-labels_of_interest = ['cingulate']
-brain_view = 'medial'
+labels_of_interest = ['V1']
+brain_view = 'lateral'
 stimuli_or_response = 'stimuli'
 epochs_to_use_dict = {'stimuli': '_nobaseline_nofilter_all_conditions_metadata_epo.fif',
                  'response': '_nobaseline_nofilter_all_conditions_metadata_response_epo.fif'}
 epochs_to_use = epochs_to_use_dict[stimuli_or_response]
 
-time_windows = [0.9,1.2]  #[-0.5,2.5]
+time_windows = [-0.5,2.5]  # [0.9,1.2]
 prestimulus_baseline = (-0.2, 0.0)
 
 peak_time_window = [0.9,1.2]
@@ -45,17 +45,23 @@ peak_labels_hemis = {key: {key:None for key in hemisphere} for key in hemisphere
 peak_morphed_labels_hemis = {key: {key:None for key in hemisphere} for key in hemisphere}
 
 overwrite_report = True
-overwrite_data = True
+overwrite_data = False
 overwrite_epochs = False
 redraw_labels = False
 
-#power, source-localisation and connectivity settings                 
-freq_min      = 4
-freq_max      = 40
+#power, source-localisation and connectivity settings
+high_or_low_freq = 'high'  # 'high' or 'low'
+if high_or_low_freq == 'high':
+    freq_min      = 30
+    freq_max      = 80
+else:
+    freq_min      = 4
+    freq_max      = 40                 
+
 con_method    = "dSPM"
 fc_method     = 'coh'
 fc_mode       = 'cwt_morlet'
-con_n_cycles  = 3
+con_n_cycles  = 12
 sfreq         = 250
 snr           = 0.3
 lambda2       = 1.0 / snr**2
@@ -64,10 +70,14 @@ baseline      = (-0.2,0.0)
 #plotting settings
 tmin_plot = -0.3
 tmax_plot = 1.5
-freq_min_plot = 4
-freq_max_plot = 40
-power_line_plot_ylims = (-0.2,0.3)
-vlines = [0.8]
+freq_min_plot = 30
+freq_max_plot = 80
+power_line_plot_ylims = (-0.05,0.05)
+power_line_plot_freqband = 'Gamma'
+power_line_plot_title = power_line_plot_freqband + ' power in '
+power_plot_line_report_tag = power_line_plot_freqband + '_power'
+power_plot_lims = [-0.05,0.05,80,5] #min, max, division,division for colorbar
+vlines = [0.0,0.8]
 vmin = -1.0
 vmax = 1.0
 fontsize = 20
@@ -123,7 +133,7 @@ else:
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
-save_fname = '_'.join([analysis_type] + [stimuli_or_response] + selected_conditions + labels_of_interest + [con_method]+[str(time_windows[0]),str(time_windows[1])]) #
+save_fname = '_'.join([analysis_type] + [stimuli_or_response] + [high_or_low_freq] + selected_conditions + labels_of_interest + [con_method]+[str(time_windows[0]),str(time_windows[1])]) # 
 data_fname = save_fname + '.pkl'
 data_savename = os.path.join(output_dir,data_fname)
 peak_times_savename = os.path.join(output_dir,save_fname + '_peak_times.pkl')
@@ -164,17 +174,17 @@ color_dict = {"search":"orchid",
 
 #recons and fsaverage directories
 subj_dir = '/autofs/space/transcend/MRI/WMA/recons/'
-fsaverageDir = '/local_mount/space/hypatia/2/users/Jasmine/MNE-sample-data/subjects/'
+fsaverageDir = '/autofs/space/hypatia_002/users/Jasmine/MNE-sample-data/subjects/'
 fname_fsaverage_src = os.path.join(fsaverageDir, "fsaverage" , "bem" , "fsaverage-ico-5-src.fif")
 
 transcend_data_dir = '/autofs/space/transcend/MEG/'
 
 #load analysed_participants_demographics file to get relevant info about participants
 participants_csvs = {
-    'AttenVis'  : '/local_mount/space/hypatia/2/users/Jasmine/AttenVis/analysed_participants_demographics.csv',
-    'AttenAud'  : '/local_mount/space/hypatia/2/users/Jasmine/AttenAud/analysed_participants_demographics.csv', 
-    'Misophonia': '/local_mount/space/hypatia/2/users/Jasmine/Misophonia/analysed_participants_demographics.csv',
-    'Misophonia_ASD_TD' :'/local_mount/space/hypatia/2/users/Jasmine/Misophonia/Miso_TD_ASD.csv', 
+    'AttenVis'  : '/autofs/space/hypatia_002/users/Jasmine/AttenVis/analysed_participants_demographics.csv',
+    'AttenAud'  : '/autofs/space/hypatia_002/users/Jasmine/AttenAud/analysed_participants_demographics.csv', 
+    'Misophonia': '/autofs/space/hypatia_002/users/Jasmine/Misophonia/analysed_participants_demographics.csv',
+    'Misophonia_ASD_TD' :'/autofs/space/hypatia_002/users/Jasmine/Misophonia/Miso_TD_ASD.csv', 
 }
 participants_csv = participants_csvs[paradigm]
 

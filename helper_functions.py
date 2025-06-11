@@ -12,7 +12,7 @@ from autoreject import get_rejection_threshold, AutoReject
 import scipy
 import csv
 
-import AttenVis_config as cfg
+import AttenVis_power_config as cfg
 
 #plotting parameters
 SMALL_SIZE = 22
@@ -360,7 +360,7 @@ def find_peak_grow_label(stc,hemi,tmin,tmax,label_size,subjID_date,peak_type,fil
     
     return annot_label,morphed_label,label_fname,peak_time
 
-def plot_time_frequency(times,freqs,condition,output_dir,miso,td,title1,title2,hemi=None):
+def plot_time_frequency(times,freqs,condition,output_dir,miso,td,title1,title2,hemi=None,add_vlines=None):
     SMALL_SIZE = 22
     plt.rcParams["font.family"] = "Arial"
     plt.rc('font', size=SMALL_SIZE)
@@ -368,22 +368,28 @@ def plot_time_frequency(times,freqs,condition,output_dir,miso,td,title1,title2,h
     plt.rcParams['figure.constrained_layout.use'] = True
 
     x_lims = [cfg.tmin_plot,cfg.tmax_plot]
-    levels = np.linspace(-0.2,0.2,80)
+    levels = np.linspace(cfg.power_plot_lims[0],cfg.power_plot_lims[1],cfg.power_plot_lims[2])
     fig = plt.figure(layout=None, figsize=[12.8,  4.8])
     gs = fig.add_gridspec(nrows=2, ncols=6)
     ax0 = fig.add_subplot(gs[0:2, 0:3])
     ax0.contourf(times,freqs,miso, levels=levels, extend='both')
+    if add_vlines:
+        for line in cfg.vlines:
+            ax0.axvline(x=line, color='black', linestyle='--', linewidth=1)
     ax0.set_xlim(x_lims)
     ax0.set_ylabel('Frequency (Hz)')
     ax0.set_title(title1)
 
     ax2 = fig.add_subplot(gs[0:2, 3:])
     cbh = ax2.contourf(times,freqs,td, levels=levels, extend='both')
+    if add_vlines:
+        for line in cfg.vlines:
+            ax2.axvline(x=line, color='black', linestyle='--', linewidth=1)
     ax2.set_xlim(x_lims)
     # ax2.set_xticklabels('')
     ax2.set_yticklabels('')
     ax2.set_title(title2)
-    plt.colorbar(cbh, label='Power (dB)', ticks=np.linspace(-0.2,0.2,5))
+    plt.colorbar(cbh, label='Power (dB)', ticks=np.linspace(cfg.power_plot_lims[0],cfg.power_plot_lims[1],cfg.power_plot_lims[3]))
     fig.supxlabel('Time (s)',fontsize = 22)
     if condition == 'miso':
         title = 'Evoked response to Trigger Sounds' 
@@ -540,20 +546,22 @@ def plot_pac(low_fq_range,high_fq_range,condition,output_dir,miso,td,title1,titl
         
 def add_tfrs_to_report(df,report,id,title1,title2):
     times = df["time"].values[0]
-    freqs = np.arange(cfg.freq_min,cfg.freq_max,1)
-    freqs_to_plot = np.arange(cfg.freq_min_plot,cfg.freq_max_plot+1,1)
+    time_to_plot = [find_nearest(times,cfg.tmin_plot),find_nearest(times,cfg.tmax_plot)]
+    time_for_plot = times[time_to_plot[0]:time_to_plot[1]]
+    freqs = np.arange(cfg.freq_min,cfg.freq_max+1,1)
+    freq_to_plot = [np.where(freqs==cfg.freq_min_plot)[0][0],np.where(freqs==cfg.freq_max_plot)[0][0]]
     for condition in cfg.brain_selected_conditions:
         image_names = []
         for hemi in cfg.hemisphere:
             df_hemi = df[df["hemisphere"]==hemi]
             #plot non-normalised power
             df_to_plot = df_hemi[(df_hemi['Diagnosis'] == 'asd') & (df_hemi['Condition']==condition)]
-            miso_data = df_to_plot['power'].values.mean()[(freqs >= cfg.freq_min_plot) & (freqs <= cfg.freq_max_plot),:]
+            miso_data = df_to_plot['power'].values.mean()[freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
 
             df_to_plot = df_hemi[(df_hemi['Diagnosis'] == 'td') & (df_hemi['Condition']==condition)]
-            td_data = df_to_plot['power'].values.mean()[(freqs >= cfg.freq_min_plot) & (freqs <= cfg.freq_max_plot),:]
+            td_data = df_to_plot['power'].values.mean()[freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
 
-            fig1, name = plot_time_frequency(times,freqs_to_plot,condition,cfg.output_dir,miso_data,td_data,title1,title2, hemi=hemi)
+            fig1, name = plot_time_frequency(time_for_plot,freqs[freq_to_plot[0]:freq_to_plot[1]],condition,cfg.output_dir,miso_data,td_data,title1,title2, hemi=hemi,add_vlines=cfg.vlines)
             #save fig
             fig_to_save = fig1.get_figure()
             fig_to_save.savefig(name.replace('.tiff','.svg'),format="svg")
@@ -597,17 +605,20 @@ def add_tfrs_to_report_three(df,report,id,title1,title2,title3):
             plt.close('all')
 
 def add_participant_tfrs_to_report(df,report,id):
-    times = df["time"].values[0]
-    freqs = np.arange(cfg.freq_min,cfg.freq_max,1)
+    time = df['time'].values[0]
+    freqs = np.arange(cfg.freq_min,cfg.freq_max+1,1)
+    time_to_plot = [find_nearest(time,cfg.tmin_plot),find_nearest(time,cfg.tmax_plot)]
+    time_for_plot = time[time_to_plot[0]:time_to_plot[1]]
+    freq_to_plot = [np.where(freqs==cfg.freq_min_plot)[0][0],np.where(freqs==cfg.freq_max_plot)[0][0]]
     for condition in cfg.condition:
         #plot non-normalised power
         df_to_plot = df[(df['hemisphere'] == 'lh') & (df['Condition']==condition)]
-        lh_data = df_to_plot['power'].values.mean()
+        lh_data = df_to_plot['power'].values.mean()[freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
 
         df_to_plot = df[(df['hemisphere'] == 'rh') & (df['Condition']==condition)]
-        rh_data = df_to_plot['power'].values.mean()
+        rh_data = df_to_plot['power'].values.mean()[freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
 
-        fig1, name = plot_time_frequency(times,freqs,condition,cfg.output_dir,lh_data,rh_data,title1='lh',title2='rh')
+        fig1, name = plot_time_frequency(time_for_plot,freqs[freq_to_plot[0]:freq_to_plot[1]],condition,cfg.output_dir,lh_data,rh_data,title1='lh',title2='rh',add_vlines= cfg.vlines)
         title = '_'.join([id,condition,'power'])
         report.add_figure(fig=fig1, title=title, section=id, tags=[condition,'power'],replace=True)
         report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
@@ -726,7 +737,7 @@ def plot_line(df,variable,ax,label,color,freqs = None,ci=False,group=False):
     time_to_plot = [find_nearest(time,cfg.tmin_plot),find_nearest(time,cfg.tmax_plot)]
     time_for_plot = time[time_to_plot[0]:time_to_plot[1]]
     if freqs is not None:
-        freq_to_plot = [np.where(np.arange(cfg.freq_min,cfg.freq_max,1)==freqs[0])[0][0],np.where(np.arange(cfg.freq_min,cfg.freq_max,1)==freqs[1])[0][0]]
+        freq_to_plot = [np.where(np.arange(cfg.freq_min,cfg.freq_max+1,1)==freqs[0])[0][0],np.where(np.arange(cfg.freq_min,cfg.freq_max+1,1)==freqs[1])[0][0]]
 
     if not group:
         data_to_plot = df[variable].mean().squeeze()
@@ -987,9 +998,9 @@ def plot_power_over_time(ax,df,tag,factor_name_in_df,freqs,group=False,highlight
 
 def add_gavg_power_over_time_to_report(df,report,id,factor_name_in_df,freqs,ci=False):
 
-    plot_title = 'Alpha power in '
+    plot_title = cfg.power_line_plot_title 
     ylims = cfg.power_line_plot_ylims
-    report_tag = 'alpha_power'
+    report_tag = cfg.power_plot_line_report_tag
     grouping_factor = cfg.df_varnames[factor_name_in_df]
     for factor_level in grouping_factor:
         fig = plt.figure(figsize=(12,6), layout='constrained')
