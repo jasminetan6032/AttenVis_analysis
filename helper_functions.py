@@ -10,13 +10,19 @@ import scipy.stats as st
 from collections import Counter
 from autoreject import get_rejection_threshold, AutoReject
 import scipy
+import pickle
 import csv
+from scipy.stats import ttest_ind, f_oneway
+from scipy.stats import ttest_rel, ttest_ind
+from scipy.ndimage import label
+import matplotlib.patches as mpatches
+from statsmodels.stats.multitest import fdrcorrection
 
-import AttenVis_power_config as cfg
+import AttenVis_config as cfg
 
 #plotting parameters
 SMALL_SIZE = 22
-plt.rcParams["font.family"] = "Arial"
+plt.rcParams["font.family"] = 'DejaVu Sans'
 plt.rc('font', size=SMALL_SIZE)
 plt.rc('axes', titlesize=SMALL_SIZE)
 plt.rc('xtick', labelsize=16)
@@ -173,6 +179,7 @@ def load_misonat_participants(study):
     return participants_df, participants_to_study_exclude
 
 def update_participants_n(participants_df,exclude_participants,study):
+    #updates number of participants currently only by Diagnosis
     if study == 'all':
         participants_to_study = participants_df['Participant'].to_list()
     elif study == 'MisoNat':
@@ -182,10 +189,11 @@ def update_participants_n(participants_df,exclude_participants,study):
     elif study == 'miso_only':
         participants_to_study = participants_df[participants_df['Diagnosis']=='misophonia']['Participant'].to_list()
     else:
-        participants_to_study = participants_df['Participant'].to_list()
-
+        participants_to_study = np.unique(participants_df['Participant'].to_list())
+    cols_to_keep = ['Participant','Diagnosis']
+    df_unique = participants_df[cols_to_keep].drop_duplicates(subset='Participant')
     participants_to_study_exclude = [x for x in participants_to_study if x not in exclude_participants]
-    df_analysed_participants = participants_df[participants_df['Participant'].isin(participants_to_study_exclude)]
+    df_analysed_participants = df_unique[df_unique['Participant'].isin(participants_to_study_exclude)]
     n_participants = df_analysed_participants.value_counts(['Diagnosis'],sort=False)
     for diagnosis in cfg.diagnoses:
         try:
@@ -323,13 +331,13 @@ def morph_fslabel(label,subjID_date,hemi):
     ax1 = fig.add_subplot(gs[0,0])
     ax1.imshow(plt.imread(brain_image_name))
     ax1.axis('off')
-    report  = mne.Report(title=cfg.morph_report_savename) if not os.path.exists(os.path.join(cfg.savedir,cfg.morph_report_savename_hdf5)) else mne.open_report(os.path.join(cfg.savedir,cfg.morph_report_savename_hdf5))
-    report.add_figure(fig = fig,title = hemi, section = subjID_date)
-    report.save(os.path.join(cfg.savedir,cfg.morph_report_savename_hdf5),verbose=False,overwrite=True)
+    # report  = mne.Report(title=cfg.morph_report_savename) if not os.path.exists(os.path.join(cfg.savedir,cfg.morph_report_savename_hdf5)) else mne.open_report(os.path.join(cfg.savedir,cfg.morph_report_savename_hdf5))
+    # report.add_figure(fig = fig,title = hemi, section = subjID_date)
+    # report.save(os.path.join(cfg.savedir,cfg.morph_report_savename_hdf5),verbose=False,overwrite=True)
 
     brain.close()
 
-    return morphed_label
+    return morphed_label[0],fig
 
 def show_report(report_name):
     """
@@ -360,191 +368,113 @@ def find_peak_grow_label(stc,hemi,tmin,tmax,label_size,subjID_date,peak_type,fil
     
     return annot_label,morphed_label,label_fname,peak_time
 
-def plot_time_frequency(times,freqs,condition,output_dir,miso,td,title1,title2,hemi=None,add_vlines=None):
+
+def plot_time_frequency(times, freqs, condition, output_dir, datasets, titles, hemi=None, add_vlines=None):
     SMALL_SIZE = 22
-    plt.rcParams["font.family"] = "Arial"
+    plt.rcParams["font.family"] = "DejaVu Sans"
     plt.rc('font', size=SMALL_SIZE)
     plt.rc('axes', titlesize=SMALL_SIZE)
     plt.rcParams['figure.constrained_layout.use'] = True
 
-    x_lims = [cfg.tmin_plot,cfg.tmax_plot]
-    levels = np.linspace(cfg.power_plot_lims[0],cfg.power_plot_lims[1],cfg.power_plot_lims[2])
-    fig = plt.figure(layout=None, figsize=[12.8,  4.8])
-    gs = fig.add_gridspec(nrows=2, ncols=6)
-    ax0 = fig.add_subplot(gs[0:2, 0:3])
-    ax0.contourf(times,freqs,miso, levels=levels, extend='both')
-    if add_vlines:
-        for line in cfg.vlines:
-            ax0.axvline(x=line, color='black', linestyle='--', linewidth=1)
-    ax0.set_xlim(x_lims)
-    ax0.set_ylabel('Frequency (Hz)')
-    ax0.set_title(title1)
+    x_lims = [cfg.tmin_plot, cfg.tmax_plot]
+    levels = np.linspace(cfg.power_plot_lims[0], cfg.power_plot_lims[1], cfg.power_plot_lims[2])
 
-    ax2 = fig.add_subplot(gs[0:2, 3:])
-    cbh = ax2.contourf(times,freqs,td, levels=levels, extend='both')
-    if add_vlines:
-        for line in cfg.vlines:
-            ax2.axvline(x=line, color='black', linestyle='--', linewidth=1)
-    ax2.set_xlim(x_lims)
-    # ax2.set_xticklabels('')
-    ax2.set_yticklabels('')
-    ax2.set_title(title2)
-    plt.colorbar(cbh, label='Power (dB)', ticks=np.linspace(cfg.power_plot_lims[0],cfg.power_plot_lims[1],cfg.power_plot_lims[3]))
-    fig.supxlabel('Time (s)',fontsize = 22)
-    if condition == 'miso':
-        title = 'Evoked response to Trigger Sounds' 
-    elif condition == 'sound2':
-        title = 'Evoked response to Neutral Sounds' 
-    elif condition == 'white_noise':
-        title = 'Evoked response to white noise' 
-    elif condition == 'amp_mod':
-        title = 'Evoked response to amplitude modulated white noise' 
-    elif condition == 'search':
-        title = 'Evoked response to stimuli during Search' 
-    elif condition == 'pop-out':
-        title = 'Evoked response to stimuli during Pop-Out' 
+    n = len(datasets)
+    fig = plt.figure(figsize=(6 * n, 5))
+    gs = fig.add_gridspec(nrows=2, ncols=3 * n)
+
+    for i, (data, title) in enumerate(zip(datasets, titles)):
+        ax = fig.add_subplot(gs[0:2, 3 * i:3 * (i + 1)])
+        cbh = ax.contourf(times, freqs, data, levels=levels, extend='both')
+        if add_vlines:
+            for line in cfg.vlines:
+                ax.axvline(x=line, color='black', linestyle='--', linewidth=1)
+        ax.set_xlim(x_lims)
+        if i == 0:
+            ax.set_ylabel('Frequency (Hz)')
+        else:
+            ax.set_yticklabels('')
+        ax.set_title(title)
+
+    fig.supxlabel('Time (s)', fontsize=22)
+    fig.colorbar(cbh, ax=fig.axes, label='Power (dB)', ticks=np.linspace(cfg.power_plot_lims[0], cfg.power_plot_lims[1], cfg.power_plot_lims[3]))
+
+    # Title based on condition
+    condition_titles = {
+        'miso': 'Evoked response to Trigger Sounds',
+        'sound2': 'Evoked response to Neutral Sounds',
+        'white_noise': 'Evoked response to white noise',
+        'amp_mod': 'Evoked response to amplitude modulated white noise',
+        'search': 'Evoked response to stimuli during Search',
+        'pop-out': 'Evoked response to stimuli during Pop-Out',
+    }
+    full_title = condition_titles.get(condition, 'Evoked response')
     if hemi:
-        fig.suptitle(title + ' (' + hemi.upper() + ')',fontsize = 22)
-    else:
-        fig.suptitle(title,fontsize = 22)
+        full_title += f" ({hemi.upper()})"
+    fig.suptitle(full_title, fontsize=22)
 
-    #save fig
-    fig_to_save = fig.get_figure()
-    if hemi == None:
-        savetitle = '_'.join([condition,'power','plot'])
+    # Save figure
+    if hemi is None:
+        savetitle = '_'.join([condition, 'power', 'plot'])
     else:
-        savetitle = '_'.join([hemi, condition,'power','plot'])
+        savetitle = '_'.join([hemi, condition, 'power', 'plot'])
+
     savename = os.path.join(output_dir, savetitle + ".tiff")
-    fig_to_save.savefig(savename,dpi=300)
+    fig.savefig(savename, dpi=300)
     plt.close()
     return fig, savename
-    
 
-def plot_time_frequency_three(times,freqs,condition,output_dir,miso,asd,td,title1,title2,title3,hemi=None):
+
+def plot_pac(low_fq_range, high_fq_range, condition, output_dir, data_list, titles, hemi=None):
     SMALL_SIZE = 22
-    plt.rcParams["font.family"] = "Arial"
+    plt.rcParams["font.family"] = "DejaVu Sans"
     plt.rc('font', size=SMALL_SIZE)
     plt.rc('axes', titlesize=SMALL_SIZE)
     plt.rcParams['figure.constrained_layout.use'] = True
-    y_lims = [2,6]
-    x_lims = [-0.5,3]
-    levels = np.linspace(-0.2,0.2,80)
-    fig = plt.figure(layout=None, figsize=[12.8,  4.8])
-    gs = fig.add_gridspec(nrows=3, ncols=9)
-    ax0 = fig.add_subplot(gs[0:2, 0:3])
-    ax0.contourf(times,freqs,miso, levels=levels, extend='both')
-    ax0.set_xlim(x_lims)
-    ax0.set_ylabel('Frequency (Hz)')
-    ax0.set_title(title1)
-    
-    ax3 = fig.add_subplot(gs[2, 0:3])
-    ax3.plot(times,np.mean(miso[(freqs >= 8) & (freqs <= 12),:], axis=0))
-    ax3.set_xlim(x_lims)
-    ax3.set_xticklabels(np.arange(0,6))
-    ax3.set_ylim(y_lims)
-    ax3.set_xlabel('Time (s)')
-    ax3.set_ylabel("α power")
 
-    ax1 = fig.add_subplot(gs[2, 3:6])
-    ax1.contourf(times,freqs,asd, levels=levels, extend='both')
-    ax1.set_xlim(x_lims)
-    ax1.set_ylabel('Frequency (Hz)')
-    ax1.set_title(title2)
-    ax4 = fig.add_subplot(gs[2, 3:6])
-    ax4.plot(times,np.mean(asd[(freqs >= 8) & (freqs <= 12),:], axis=0))
-    ax4.set_xlim(x_lims)
-    ax4.set_xticklabels(np.arange(0,6))
-    ax4.set_ylim(y_lims)
-    ax4.set_xlabel('Time (s)')
-    ax4.set_ylabel("α power")
+    levels = np.linspace(cfg.crossfreq_plot_lims[0], cfg.crossfreq_plot_lims[1], cfg.crossfreq_plot_lims[2])
+    n_panels = len(data_list)
 
+    fig, ax = plt.subplots(1, n_panels, figsize=(6 * n_panels, 5))
 
-    ax2 = fig.add_subplot(gs[0:2, 6:9])
-    cbh = ax2.contourf(times,freqs,td, levels=levels, extend='both')
-    ax2.set_xlim(x_lims)
-    # ax2.set_xticklabels('')
-    ax2.set_yticklabels('')
-    ax2.set_title(title3)
-    plt.colorbar(cbh, label='Power (dB)', ticks=np.linspace(-0.2,0.2,5))
+    # Ensure ax is iterable even for one panel
+    if n_panels == 1:
+        ax = [ax]
 
-    ax5 = fig.add_subplot(gs[2, 6:9])
-    ax5.plot(times,np.mean(td[(freqs >= 8) & (freqs <= 12),:], axis=0))
-    ax5.set_xlim(x_lims)
-    ax5.set_xticklabels(np.arange(0,6))
-    ax5.set_ylim(y_lims)
-    ax5.set_xlabel('Time (s)')
-    ax5.set_ylabel("α power")
+    for i, (data, title) in enumerate(zip(data_list, titles)):
+        cf = ax[i].contourf(low_fq_range, high_fq_range, data.T, levels=levels, extend='both')
+        ax[i].set_xlabel('Driver Frequency (Hz)')
+        ax[i].set_title(title)
+        if i == 0:
+            ax[i].set_ylabel('Frequency (Hz)')
+        else:
+            ax[i].set_yticklabels('')
 
-    fig.supxlabel('Time (s)',fontsize = 22)
-    if condition == 'miso':
-        title = 'Evoked response to misophonic trigger' 
-    elif condition == 'sound2':
-        title = 'Evoked response to neutral sound' 
-    elif condition == 'white_noise':
-        title = 'Evoked response to white noise' 
-    elif condition == 'amp_mod':
-        title = 'Evoked response to amplitude modulated white noise' 
-    elif condition == 'distractors':
-        title = 'Evoked response to novel distractors' 
+    # Shared colorbar
+    fig.colorbar(cf, ax=ax, label='PAC', ticks=np.linspace(cfg.crossfreq_plot_lims[0], cfg.crossfreq_plot_lims[1], cfg.crossfreq_plot_lims[3]))
 
+    # Title based on condition
+    condition_titles = {
+        'miso': 'Evoked response to Trigger Sounds',
+        'sound2': 'Evoked response to Neutral Sounds',
+        'white_noise': 'Evoked response to white noise',
+        'amp_mod': 'Evoked response to amplitude modulated white noise',
+        'search': 'Evoked response to stimuli during Search',
+        'pop-out': 'Evoked response to stimuli during Pop-Out',
+    }
+    full_title = condition_titles.get(condition, 'Evoked response')
     if hemi:
-        fig.suptitle(title + ' (' + hemi.upper() + ')',fontsize = 22)
-    else:
-        fig.suptitle(title,fontsize = 22)
+        full_title += f" ({hemi.upper()})"
+    fig.suptitle(full_title, fontsize=22)
 
-    #save fig
-    fig_to_save = fig.get_figure()
-    if hemi == None:
-        savetitle = '_'.join([condition,'power','plot'])
-    else:
-        savetitle = '_'.join([hemi, condition,'power','plot'])
+    # Save fig
+    savetitle = '_'.join(filter(None, [hemi, condition, 'pac', 'plot']))
     savename = os.path.join(output_dir, savetitle + ".tiff")
-    fig_to_save.savefig(savename,dpi=300)
-    plt.close()
+    fig.savefig(savename, dpi=300)
+    plt.close(fig)
     return fig, savename
-    
-def plot_pac(low_fq_range,high_fq_range,condition,output_dir,miso,td,title1,title2,hemi=None):
-    SMALL_SIZE = 22
-    plt.rcParams["font.family"] = "Arial"
-    plt.rc('font', size=SMALL_SIZE)
-    plt.rc('axes', titlesize=SMALL_SIZE)
-    plt.rcParams['figure.constrained_layout.use'] = True
-
-    levels = np.linspace(0,0.025,15)
-    fig,ax = plt.subplots(1,2, figsize=[10.18,  5.05])
-
-    ax[0].contourf(low_fq_range,high_fq_range,miso.T, levels=levels , extend='both')
-    ax[0].set_ylabel('Frequency (Hz)')
-    ax[0].set_xlabel('Driver Frequency (Hz)')
-    ax[0].set_title(title1)
-    cbh = ax[1].contourf(low_fq_range,high_fq_range,td.T, levels=levels, extend='both' )
-    ax[1].set_yticklabels('')
-    ax[1].set_xlabel('Driver Frequency (Hz)')
-    ax[1].set_title(title2)
-    plt.colorbar(cbh, label='PAC', ticks=np.linspace(0,0.025,7))
-
-    if condition == 'miso':
-        title = 'Evoked response to misophonic trigger'
-    elif condition == 'sound2':
-        title = 'Evoked response to neutral sound'
-    elif condition == 'white_noise':
-        title = 'Evoked response to white noise'
-    elif condition == 'amp_mod':
-        title = 'Evoked response to amplitude modulated white noise'
-    fig.suptitle(title,fontsize = 22)
-
-    #save fig
-    fig_to_save = fig.get_figure()
-    if hemi == None:
-        savetitle = '_'.join([condition,'pac','plot'])
-    else:
-        savetitle = '_'.join([hemi, condition,'pac','plot'])
-    savename = os.path.join(output_dir, savetitle + ".tiff")
-    fig_to_save.savefig(savename,dpi=300)
-    plt.close()
-    return fig, savename
-        
-def add_tfrs_to_report(df,report,id,title1,title2):
+       
+def add_tfrs_to_report(df,report,id):
     times = df["time"].values[0]
     time_to_plot = [find_nearest(times,cfg.tmin_plot),find_nearest(times,cfg.tmax_plot)]
     time_for_plot = times[time_to_plot[0]:time_to_plot[1]]
@@ -554,14 +484,18 @@ def add_tfrs_to_report(df,report,id,title1,title2):
         image_names = []
         for hemi in cfg.hemisphere:
             df_hemi = df[df["hemisphere"]==hemi]
-            #plot non-normalised power
-            df_to_plot = df_hemi[(df_hemi['Diagnosis'] == 'asd') & (df_hemi['Condition']==condition)]
-            miso_data = df_to_plot['power'].values.mean()[freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
+            datasets = []
+            for diagnosis in cfg.diagnoses:
+                df_to_plot = df_hemi[(df_hemi['Diagnosis'] == diagnosis) & (df_hemi['Condition']==condition)]
+                if df_to_plot.empty:
+                    print(f"No data for {diagnosis} in {condition} for {hemi}. Skipping...")
+                    continue
+                avg_data = np.stack(df_to_plot['power'].values).mean(axis=0)
+                sliced_data = avg_data[freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
+                datasets.append(sliced_data)
+            titles = [cfg.diagnoses[diag]['label_n'] for diag in cfg.diagnoses]
 
-            df_to_plot = df_hemi[(df_hemi['Diagnosis'] == 'td') & (df_hemi['Condition']==condition)]
-            td_data = df_to_plot['power'].values.mean()[freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
-
-            fig1, name = plot_time_frequency(time_for_plot,freqs[freq_to_plot[0]:freq_to_plot[1]],condition,cfg.output_dir,miso_data,td_data,title1,title2, hemi=hemi,add_vlines=cfg.vlines)
+            fig1, name = plot_time_frequency(time_for_plot,freqs[freq_to_plot[0]:freq_to_plot[1]],condition,cfg.output_dir,datasets,titles, hemi=hemi,add_vlines=cfg.vlines)
             #save fig
             fig_to_save = fig1.get_figure()
             fig_to_save.savefig(name.replace('.tiff','.svg'),format="svg")
@@ -579,84 +513,95 @@ def add_tfrs_to_report(df,report,id,title1,title2):
         title = '_'.join([id,condition,'power'])
         
         report.add_figure(fig=fig, title=title, section=id, tags=[condition,'power'],replace=True)
+        report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
         plt.close('all')
 
-def add_tfrs_to_report_three(df,report,id,title1,title2,title3):
-    times = df["time"].values[0]
-    freqs = np.arange(cfg.freq_min,cfg.freq_max,1)
-    for condition in cfg.condition:
-        for hemi in cfg.hemisphere:
-            df_hemi = df[df["hemisphere"]==hemi]
-            #plot non-normalised power
-            df_to_plot = df_hemi[(df_hemi['Diagnosis'] == 'miso') & (df_hemi['Condition']==condition)]
-            miso_data = df_to_plot['power'].values.mean()
-
-            df_to_plot = df_hemi[(df_hemi['Diagnosis'] == 'asd') & (df_hemi['Condition']==condition)]
-            asd_data = df_to_plot['power'].values.mean()
-
-            df_to_plot = df_hemi[(df_hemi['Diagnosis'] == 'td') & (df_hemi['Condition']==condition)]
-            td_data = df_to_plot['power'].values.mean()
-
-            fig1, name = plot_time_frequency_three(times,freqs,condition,cfg.output_dir,miso_data,asd_data,td_data,title1,title2, title3, hemi=hemi)
-            title = '_'.join([id,hemi,condition,'power'])
-            report.add_figure(fig=fig1, title=title, section=id, tags=[hemi,condition,'power'],replace=True)
-            report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
-
-            plt.close('all')
-
-def add_participant_tfrs_to_report(df,report,id):
+def plot_participant_tfrs(df,id):
+    pics = []
     time = df['time'].values[0]
     freqs = np.arange(cfg.freq_min,cfg.freq_max+1,1)
     time_to_plot = [find_nearest(time,cfg.tmin_plot),find_nearest(time,cfg.tmax_plot)]
     time_for_plot = time[time_to_plot[0]:time_to_plot[1]]
     freq_to_plot = [np.where(freqs==cfg.freq_min_plot)[0][0],np.where(freqs==cfg.freq_max_plot)[0][0]]
     for condition in cfg.condition:
-        #plot non-normalised power
-        df_to_plot = df[(df['hemisphere'] == 'lh') & (df['Condition']==condition)]
-        lh_data = df_to_plot['power'].values.mean()[freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
-
-        df_to_plot = df[(df['hemisphere'] == 'rh') & (df['Condition']==condition)]
-        rh_data = df_to_plot['power'].values.mean()[freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
-
-        fig1, name = plot_time_frequency(time_for_plot,freqs[freq_to_plot[0]:freq_to_plot[1]],condition,cfg.output_dir,lh_data,rh_data,title1='lh',title2='rh',add_vlines= cfg.vlines)
-        title = '_'.join([id,condition,'power'])
-        report.add_figure(fig=fig1, title=title, section=id, tags=[condition,'power'],replace=True)
-        report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
-        plt.close('all')
-
-def add_participant_pacs_to_report(df,report,id):
-    low_fq_range = df["low_freqs"].values[0]
-    high_fq_range = df["high_freqs"].values[0]
-    for condition in cfg.condition:
-        #plot non-normalised power
-        df_to_plot = df[(df['hemisphere'] == 'lh') & (df['Condition']==condition)]
-        miso_data = df_to_plot['pac'].values.mean()
-
-        df_to_plot = df[(df['hemisphere'] == 'rh') & (df['Condition']==condition)]
-        td_data = df_to_plot['pac'].values.mean()
-
-        fig1, name = plot_pac(low_fq_range,high_fq_range,condition,cfg.output_dir,miso_data,td_data,title1='lh',title2='rh')
-        title = '_'.join([id,condition,'pac'])
-        report.add_figure(fig=fig1, title=title, section=id, tags=[condition,'pac'],replace=True)
-        plt.close('all')
-
-def add_pacs_to_report(df,report,id,title1,title2):
-    low_fq_range = df["low_freqs"].values[0]
-    high_fq_range = df["high_freqs"].values[0]
-    for condition in cfg.condition:
+        datasets = []
         for hemi in cfg.hemisphere:
             df_hemi = df[df["hemisphere"]==hemi]
             #plot non-normalised power
-            df_to_plot = df_hemi[(df_hemi['Diagnosis'] == 'miso') & (df_hemi['Condition']==condition)]
-            miso_data = df_to_plot['pac'].values.mean()
+            df_to_plot = df_hemi[(df_hemi['Condition']==condition)]
+            if df_to_plot.empty:
+                print(f"No data for {condition} in {hemi}. Skipping...")
+                continue
+            avg_data = np.stack(df_to_plot['power'].values).mean(axis=0)
+            sliced_data = avg_data[freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
+            datasets.append(sliced_data)
+        titles = ['Left Hemisphere', 'Right Hemisphere']
 
-            df_to_plot = df_hemi[(df_hemi['Diagnosis'] == 'td') & (df_hemi['Condition']==condition)]
-            td_data = df_to_plot['pac'].values.mean()
+        fig1, name = plot_time_frequency(time_for_plot,freqs[freq_to_plot[0]:freq_to_plot[1]],condition,cfg.output_dir,datasets,titles,add_vlines= cfg.vlines)
+        title = '_'.join([id,condition,'power'])
+        pics.append([fig1,title,condition])
+    return pics
 
-            fig1, name = plot_pac(low_fq_range,high_fq_range,condition,cfg.output_dir,miso_data,td_data,title1,title2)
+
+def plot_participant_pacs(df,id):
+    pics = []
+    low_fq_range = df["low_freqs"].values[0]
+    high_fq_range = df["high_freqs"].values[0]
+    for condition in cfg.condition:
+        datasets = []
+        for hemi in cfg.hemisphere:
+            df_hemi = df[df["hemisphere"]==hemi]
+            #plot non-normalised power
+            df_to_plot = df_hemi[(df_hemi['Condition']==condition)]
+            if df_to_plot.empty:
+                print(f"No data for {condition} in {hemi}. Skipping...")
+                continue
+            avg_data = np.stack(df_to_plot['pac'].values).mean(axis=0)
+            datasets.append(avg_data)
+        titles = ['Left Hemisphere', 'Right Hemisphere']
+        
+        fig1, name = plot_pac(low_fq_range,high_fq_range,condition,cfg.output_dir,datasets,titles,hemi=hemi)
+        title = '_'.join([id,condition,'pac'])
+        pics.append([fig1,title,condition])
+    return pics
+
+def add_pacs_to_report(df,report,id):
+    low_fq_range = df["low_freqs"].values[0]
+    high_fq_range = df["high_freqs"].values[0]
+    for condition in cfg.condition:
+        image_names = []
+        for hemi in cfg.hemisphere:
+            df_hemi = df[df["hemisphere"]==hemi]
+            datasets = []
+            for diagnosis in cfg.diagnoses:
+                df_to_plot = df_hemi[(df_hemi['Diagnosis'] == diagnosis) & (df_hemi['Condition']==condition)]
+                if df_to_plot.empty:
+                    print(f"No data for {diagnosis} in {condition} for {hemi}. Skipping...")
+                    continue
+                avg_data = np.stack(df_to_plot['pac'].values).mean(axis=0)
+                datasets.append(avg_data)
+            titles = [cfg.diagnoses[diag]['label_n'] for diag in cfg.diagnoses]
+
+            fig1, name = plot_pac(low_fq_range,high_fq_range,condition,cfg.output_dir,datasets,titles,hemi=hemi)
             title = '_'.join([id,condition,'pac'])
-            report.add_figure(fig=fig1, title=title, section=id, tags=[condition,'pac'],replace=True)
-            plt.close('all')
+            #save fig
+            fig_to_save = fig1.get_figure()
+            fig_to_save.savefig(name.replace('.tiff','.svg'),format="svg")
+            fig_to_save.savefig(name,dpi=300)
+            image_names.append(name)
+            plt.close()
+        fig = plt.figure(figsize=(18,6), layout='constrained')
+        gs  = GridSpec(1, 2, figure=fig) 
+        ax1 = fig.add_subplot(gs[0,0])
+        ax2 = fig.add_subplot(gs[0,1])
+        ax1.imshow(plt.imread(image_names[0]))
+        ax1.axis('off')
+        ax2.imshow(plt.imread(image_names[1]))
+        ax2.axis('off')
+        title = '_'.join([id,condition,'power'])
+        report.add_figure(fig=fig, title=title, section=id, tags=[condition,'pac'],replace=True)
+        report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
+        plt.close('all')
 
 def plot_participant_labels_on_fsaverage(df,hemi):
     brain = mne.viz.Brain(subject = 'fsaverage',hemi = hemi ,views = cfg.brain_view,subjects_dir = cfg.fsaverageDir,surf='inflated',background='white')
@@ -707,7 +652,7 @@ def add_fsaverage_to_report(report,df,label_name,seed_hemi=None):
 
 
 
-def plot_stc(stc,hemi,initial_time,annot_label,condition,label_color,other_hemi=None):
+def plot_stc(id,stc,hemi,initial_time,annot_label,condition,label_color,other_hemi=None):
     brain = stc.plot(
     subjects_dir='/autofs/space/transcend/MRI/WMA/recons/',
     hemi=hemi,
@@ -721,7 +666,7 @@ def plot_stc(stc,hemi,initial_time,annot_label,condition,label_color,other_hemi=
     brain.add_text(0.1, 0.9, condition, "title", font_size=16)
     if other_hemi is None:
         other_hemi = hemi
-    brain_image_name = os.path.join(cfg.output_dir,'_'.join([condition,hemi, other_hemi, "brain.tiff"]))
+    brain_image_name = os.path.join(cfg.output_dir,'_'.join([id,condition,hemi, other_hemi, "brain.tiff"]))
     brain.save_image(filename=brain_image_name, mode='rgb')
     brain.close()
 
@@ -763,13 +708,103 @@ def plot_line(df,variable,ax,label,color,freqs = None,ci=False,group=False):
 
     return ax
 
-def plot_activations(df,plot_title,tag,factor,factor_name_in_df,group=False,ci=False,add_vlines = None):
+def compute_sig_mask(df, factor_name, variable='stc', alpha=0.05, paired=False):
+    """
+    Computes a significance mask across time points between levels of a categorical variable.
+
+    For 2 levels: uses independent (or paired) t-test.
+    For >2 levels: uses one-way ANOVA.
+
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        The dataframe containing the time series data.
+    factor_name : str
+        Column name for the categorical variable (e.g., 'Condition').
+    levels : list of str
+        Levels to compare (e.g., ['Search', 'Pop-out'] or ['ASD', 'TD', 'Other']).
+    variable : str
+        Column name containing 1D time series arrays (e.g., 'stc').
+    alpha : float
+        Significance threshold.
+    paired : bool
+        If True and len(levels) == 2, performs a paired t-test (requires matching subjects in order).
+
+    Returns:
+    --------
+    sig_mask : np.ndarray of bool
+        Boolean array indicating where the comparison is significant (p < alpha).
+    p_vals : np.ndarray of float
+        P-values at each time point.
+    """
+    data_by_level = []
+
+    for level in cfg.df_varnames[factor_name]:
+        series_list = df[df[factor_name] == level][variable].to_list()
+        arr = np.vstack(series_list)  # shape: (n_subjects, n_times)
+        data_by_level.append(arr)
+
+    n_times = data_by_level[0].shape[1]
+
+    if len(levels) == 2:
+        data1, data2 = data_by_level
+        if paired:
+            from scipy.stats import ttest_rel
+            t_stats, p_vals = ttest_rel(data1, data2, axis=0)
+        else:
+            t_stats, p_vals = ttest_ind(data1, data2, axis=0, equal_var=False)
+    else:
+        # ANOVA for each time point
+        p_vals = np.array([
+            f_oneway(*(group[:, t] for group in data_by_level))[1]
+            for t in range(n_times)
+        ])
+    rej, p_vals_corr = fdrcorrection(p_vals, alpha=alpha, method='indep', is_sorted=False)
+    sig_mask = rej #p_vals < alpha
+    time = df['time'].values[0]
+    time_to_plot = [find_nearest(time,cfg.tmin_plot),find_nearest(time,cfg.tmax_plot)]
+    time_for_plot_sig_mask = sig_mask[time_to_plot[0]:time_to_plot[1]]
+    return time_for_plot_sig_mask, p_vals_corr
+
+def add_significance_bar(ax, sig_mask, times, y_offset=0.02, bar_height=8, color='black'):
+    """
+    Adds a horizontal bar just above the x-axis to indicate significant time windows.
+
+    Parameters:
+    -----------
+    ax : matplotlib.axes.Axes
+        The axis to draw on.
+    sig_mask : array-like of bool
+        Boolean array indicating significant time points.
+    times : array-like
+        Time points corresponding to sig_mask.
+    y_offset : float
+        Offset (in axis units) above the bottom y-limit to place the bar.
+    bar_height : float
+        Line width of the significance bar.
+    color : str
+        Color of the significance bar.
+    """
+    if sig_mask is None or times is None:
+        return
+
+    y_min, y_max = ax.get_ylim()
+    bar_y = y_min + y_offset * (y_max - y_min)
+
+    for i in range(len(times) - 1):
+        if sig_mask[i]:
+            ax.hlines(y=bar_y, xmin=times[i], xmax=times[i + 1],
+                      color=color, linewidth=bar_height)
+            
+def plot_activations(df,plot_title,tag,factor,factor_name_in_df,group=False,ci=False,add_vlines = None,sig_mask=None,paired = True):
     #plot activations in time window
     SMALL_SIZE = 22
-    plt.rcParams["font.family"] = "Arial"
+    plt.rcParams["font.family"] = "DejaVu Sans"
     plt.rc('font', size=SMALL_SIZE)
     plt.rc('axes', titlesize=SMALL_SIZE)
-
+    time = df['time'].values[0]
+    time_to_plot = [find_nearest(time,cfg.tmin_plot),find_nearest(time,cfg.tmax_plot)]
+    time_for_plot = time[time_to_plot[0]:time_to_plot[1]]
     sub_fig,sub_ax1 = plt.subplots(figsize=(6.4,4.8), layout='constrained')
     for level in factor:       
         df_to_plot = df[(df[factor_name_in_df]==level)]
@@ -783,6 +818,9 @@ def plot_activations(df,plot_title,tag,factor,factor_name_in_df,group=False,ci=F
     if add_vlines is not None:
         for vline in add_vlines:
             sub_ax1.axvline(x=vline, ls='--', color='k')
+    if sig_mask is not None:
+        sig_mask, p_vals = compute_sig_mask(df, factor_name_in_df,variable='stc', alpha=cfg.alpha, paired=paired)
+    add_significance_bar(sub_ax1, sig_mask, time_for_plot)
 
     title = plot_title + tag + ' \n '
     sub_ax1.set_title(title,fontsize=16)
@@ -793,30 +831,29 @@ def plot_activations(df,plot_title,tag,factor,factor_name_in_df,group=False,ci=F
         
     return sub_fig,savename
 
-def add_participant_activations_to_report(df,report,id):
-    diagnosis = df["Diagnosis"].values[0]
+def plot_participant_activations(df):
+    pics = []
     for hemi in cfg.hemisphere:
         df_hemi = df[df["hemisphere"]==hemi]
         hemi_tag = ' (' + hemi.upper() + ')'
         #plot time series activations   
-        fig1,filename= plot_activations(df_hemi,'Activations from ',df['Participant'].values[0] + hemi_tag,cfg.plot_selected_conditions,'Condition', group=False,add_vlines=cfg.vlines)
+        fig1,filename= plot_activations(df_hemi,'Activations from ',df['Participant'].values[0] + hemi_tag,cfg.plot_selected_conditions,'Condition', 
+                                        group=False,add_vlines=cfg.vlines,sig_mask=None,paired=None)
         fig = plt.figure(figsize=(18,6), layout='constrained')
         gs  = GridSpec(1, 3, figure=fig) 
         ax1 = fig.add_subplot(gs[0,0])
         ax2 = fig.add_subplot(gs[0,1])
         ax3 = fig.add_subplot(gs[0,2])
-        brain1_image_name = os.path.join(cfg.output_dir,'_'.join([list(cfg.brain_selected_conditions)[0],hemi,hemi, "brain.tiff"]))
+        brain1_image_name = df_hemi[df_hemi['Condition'] == cfg.brain_selected_conditions[0]]['brain_image'].values[0]
+        brain2_image_name = df_hemi[df_hemi['Condition'] == cfg.brain_selected_conditions[1]]['brain_image'].values[0]
         ax1.imshow(plt.imread(brain1_image_name))
         ax1.axis('off')
-        brain2_image_name = os.path.join(cfg.output_dir,'_'.join([list(cfg.brain_selected_conditions)[1],hemi,hemi, "brain.tiff"]))
         ax2.imshow(plt.imread(brain2_image_name))
         ax2.axis('off')
         ax3.imshow(plt.imread(filename))
         ax3.axis('off')
-        title = '_'.join([id,hemi,'activations'])
-        report.add_figure(fig=fig, title=title, section=id, tags=[hemi,'activations',diagnosis],replace=True)
-        plt.close('all')
-        report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
+        pics.append([fig,hemi])
+    return pics
 
 def add_gavg_activations_to_report(df,report,id,grouping_factor,factor_name_in_df):
     for factor_level in grouping_factor:
@@ -825,9 +862,11 @@ def add_gavg_activations_to_report(df,report,id,grouping_factor,factor_name_in_d
             hemi_tag = ' (' + hemi.upper() + ')'
             df_to_plot = df[(df[factor_name_in_df] == factor_level) & (df['hemisphere'] == hemi)]
             if factor_name_in_df == 'Diagnosis':
-                fig1,filename= plot_activations(df_to_plot,'Activations from ',factor_level + hemi_tag,cfg.plot_selected_conditions,'Condition',group=True,ci = True,add_vlines=cfg.vlines)
+                fig1,filename= plot_activations(df_to_plot,'Activations from ',factor_level.upper() + hemi_tag,cfg.plot_selected_conditions,'Condition',
+                                                group=True,ci = True,add_vlines=cfg.vlines,sig_mask=True,paired=True)
             elif factor_name_in_df == 'Condition':
-                fig1,filename= plot_activations(df_to_plot,'Activations from ',factor_level + hemi_tag,cfg.diagnoses,'Diagnosis',group=True,ci = True)
+                fig1,filename= plot_activations(df_to_plot,'Activations from ',factor_level.capitalize() + hemi_tag,cfg.diagnoses,'Diagnosis',
+                                                group=True,ci = True,add_vlines=cfg.vlines,sig_mask=True,paired=False)
             filenames_hemis.update({hemi:filename})
         fig = plt.figure(figsize=(18,6), layout='constrained')
         gs  = GridSpec(1, 2, figure=fig) 
@@ -975,7 +1014,10 @@ def plot_coh_conditions(ax,df,tag,factor,factor_name_in_df,ylims,ci=False,group=
 
     return ax
 
-def plot_power_over_time(ax,df,tag,factor_name_in_df,freqs,group=False,highlight_area=False,area_time_window=None,plot_title=None,ylims=None,ci=False):
+def plot_power_over_time(ax,df,tag,factor_name_in_df,freqs,group=False,highlight_area=False,area_time_window=None,plot_title=None,ylims=None,ci=False,sig_mask=None,paired=True):
+    time = df['time'].values[0]
+    time_to_plot = [find_nearest(time,cfg.tmin_plot),find_nearest(time,cfg.tmax_plot)]
+    time_for_plot = time[time_to_plot[0]:time_to_plot[1]]
     for level in cfg.df_varnames[factor_name_in_df]:       
         df_to_plot = df[(df[factor_name_in_df]==level)]
         ax = plot_line(df_to_plot,'power',ax,cfg.plot_labels[level]['label'],cfg.color_dict[level],freqs=freqs,ci=True,group=group)
@@ -993,14 +1035,17 @@ def plot_power_over_time(ax,df,tag,factor_name_in_df,freqs,group=False,highlight
     if plot_title:
         title = plot_title + tag + ' \n '
         ax.set_title(title,fontsize=16)
+    if sig_mask is not None:
+        sig_mask, p_vals = compute_sig_mask(df, factor_name_in_df, variable='stc', alpha=cfg.alpha, paired=paired)
+    add_significance_bar(ax, sig_mask, time_for_plot)
 
     return ax
 
-def add_gavg_power_over_time_to_report(df,report,id,factor_name_in_df,freqs,ci=False):
+def add_gavg_power_over_time_to_report(df,report,id,factor_name_in_df,freq_label,freqs,ci=False):
 
-    plot_title = cfg.power_line_plot_title 
+    plot_title = freq_label + ' power in ' 
     ylims = cfg.power_line_plot_ylims
-    report_tag = cfg.power_plot_line_report_tag
+    report_tag = freq_label + '_power'
     grouping_factor = cfg.df_varnames[factor_name_in_df]
     for factor_level in grouping_factor:
         fig = plt.figure(figsize=(12,6), layout='constrained')
@@ -1322,7 +1367,7 @@ def clean_epochs_by_behaviour(epochs,rt_based=None, percent=None, correct_answer
 
     return correct_answers_cleaned, summary
 
-def plot_participant_RT_hist(data, data_cleaned,report,id):
+def plot_participant_RT_hist(data, data_cleaned):
     fig = plt.figure(figsize=(10,4.8), layout='constrained')
     gs  = GridSpec(1, 2, figure=fig) 
     ax1 = fig.add_subplot(gs[0,0])
@@ -1336,35 +1381,56 @@ def plot_participant_RT_hist(data, data_cleaned,report,id):
     ax2.set_title('Reaction Time - After Cleaning')
     ax2.set_xlabel('RT (ms)')
     ax2.set_ylabel('Frequency')
-    report.add_figure(fig=fig, title='RT_hist', section=id, tags=['histogram'],replace=True)
-    report.save(cfg.rt_report_savename_hdf5, verbose=False, overwrite=True)
 
-    plt.close('all')
+    return fig
 
-def plot_RT(data,report,id):
+def plot_RT(data, group = False):
 # Create a figure handle
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(10, 6))
 
-    # Plot with median and bootstrapped 95% confidence intervals
-    sns.lineplot(
-        data=data,
-        x='difficulty',
-        y='RT',
-        hue='Condition',
-        marker='o',
-        estimator=np.median,
-        errorbar=('ci', 95),         # Bootstrapped CI
-        n_boot=1000,       # Number of bootstrap samples (adjust as needed)
-        ax=ax              # Use figure handle
-    )
-
+    if group:
+        # Plot with median and bootstrapped 95% confidence intervals
+        sns.lineplot(
+            data=data,
+            x='difficulty',
+            y='RT',
+            hue='Diagnosis',
+            marker='o',
+            style='Condition',
+            estimator=np.median,
+            errorbar=('ci', 95),         # Bootstrapped CI
+            n_boot=1000,       # Number of bootstrap samples (adjust as needed)
+            ax=ax              # Use figure handle
+        )
+    else:
+        # Plot with median and bootstrapped 95% confidence intervals
+        sns.lineplot(
+            data=data,
+            x='difficulty',
+            y='RT',
+            hue='Condition',
+            marker='o',
+            estimator=np.median,
+            errorbar=('ci', 95),         # Bootstrapped CI
+            n_boot=1000,       # Number of bootstrap samples (adjust as needed)
+            ax=ax              # Use figure handle
+        )
     ax.set_title('Median Reaction Time by Difficulty and Condition')
     ax.set_ylabel('Median RT (ms)')
     ax.set_xlabel('Difficulty')
-    report.add_figure(fig=fig, title='RTs', section=id, tags=['line_plot'],replace=True)
-    report.save(cfg.rt_report_savename_hdf5, verbose=False, overwrite=True)
+    # Move legend outside
+    ax.legend(
+        bbox_to_anchor=(1.02, 1),  # move outside right
+        loc='upper left',
+        borderaxespad=0
+    )
 
-    plt.close('all')
+    plt.tight_layout()  # ensure everything fits
+    return fig
+
+def add_table_to_report(df,report,id):
+    text_block = df.to_html()
+    report.add_html(text_block, title='RT Summary Table', section=id, tags=['RT_summary_table'], replace=True)
 
 def find_response_triggers(events):
     events_data = pd.DataFrame(events)
@@ -1443,7 +1509,7 @@ def epochs_metadata(participant,visit_dir,locked_to ='stimuli', overwrite=False)
 
     return all_epochs
 
-def inverse_from_prestimulus_baseline(participant,all_epochs,evoked, visit_dir,report,overwrite=False):
+def inverse_from_prestimulus_baseline(all_epochs,visit_dir,overwrite=False):
     #load fwd for inverse operator
     fwd_fname = find_files('_fwd.fif',visit_dir)[0]
     fwd = mne.read_forward_solution(fwd_fname)
@@ -1457,14 +1523,19 @@ def inverse_from_prestimulus_baseline(participant,all_epochs,evoked, visit_dir,r
         noise_cov = mne.read_cov(cov_fname)
         msg = 'Covariance already exists. Using existing covariance.'
         print(msg)
-    report.add_covariance(cov = cov_fname,info = all_epochs.info,title = participant + ' Covariance from prestimulus baseline',replace = True)
-    report.add_evokeds(evoked,titles = participant + ' Evoked from prestimulus baseline',noise_cov = noise_cov,replace = True)
-    report.save(cfg.inv_report_savename_hdf5, verbose=False, overwrite=True)
+
     #compute inverse operator
     inv_fname = fwd_fname.replace('_run01_fwd.fif','_prestim_baseline_inv.fif')
     if not os.path.exists(inv_fname) or overwrite:
         inv_operator  = mne.minimum_norm.make_inverse_operator(all_epochs.info, fwd, noise_cov, loose=0.2, depth=0.8, rank='info')
         mne.minimum_norm.write_inverse_operator(inv_fname,inv_operator,overwrite=overwrite)
+    return cov_fname
+
+def add_whitened_evoked_prestim_baseline(participant,cov_fname,all_epochs,evoked,report):
+    report.add_covariance(cov = cov_fname,info = all_epochs.info,title = participant + ' Covariance from prestimulus baseline',replace = True)
+    noise_cov = mne.read_cov(cov_fname)
+    report.add_evokeds(evoked,titles = participant + ' Evoked from prestimulus baseline',noise_cov = noise_cov,replace = True)
+    report.save(cfg.inv_report_savename_hdf5, verbose=False, overwrite=True)
 
 def add_whitened_evoked_erm(participant,visit_dir,evoked,report):
     erm_cov_fname = find_files(participant + '_erm_cov.fif', visit_dir)
@@ -1479,12 +1550,17 @@ def collate_participants_data(participants_df,participants_to_study):
     for participant in participants_to_study:
         visit_dir = participants_df[participants_df['Participant'] == participant]['Visit_Dir'].values[0]
         filename = find_files(cfg.data_fname.replace('.pkl','_' + participant + '.pkl'),visit_dir)
-        participant_df = pd.read_pickle(filename[0])
+        try:
+            participant_df = pd.read_pickle(filename[0])
+        except:
+            print(f"Error loading data for participant {participant}. File not found or corrupted.")
+            continue
         all_participants.append(participant_df)
     all_participants_df = pd.concat(all_participants,ignore_index=True).sort_values(by = 'Participant')
     return all_participants_df
 
 def draw_label_from_epochs(visit_dir,subjID_date,epochs,inverse_operator,label_to_draw_from = 'fs_drawn',filter = None):
+    peak_info = {}
     #load epochs and get evoked
     epochs_clean = get_condition_epochs(epochs.copy(),condition = None)
     baseline_evoked = get_evoked(epochs_clean,filter=filter,baseline=cfg.baseline)
@@ -1493,34 +1569,45 @@ def draw_label_from_epochs(visit_dir,subjID_date,epochs,inverse_operator,label_t
     for hemi in cfg.hemisphere:
         #load_labels
         if label_to_draw_from == 'fs_drawn': 
-            annot_label = morph_fslabel(cfg.labels_list[0],subjID_date,hemi)[0]
+            annot_label, fig = morph_fslabel(cfg.labels_list[0],subjID_date,hemi)
         elif label_to_draw_from == 'annot':
             parc = 'aparc.a2009s'
             annot_label = load_annot_labels(cfg.labels_list,subjID_date,parc,hemi,cfg.subj_dir)
         stc_from_annot_label = stc.in_label(annot_label)
         grown_label,morphed_label,label_fname,peak_time = find_peak_grow_label(stc_from_annot_label,hemi,cfg.peak_time_window[0],cfg.peak_time_window[1],5,subjID_date,'pow',visit_dir)
-        cfg.peak_labels_hemis.update({hemi:grown_label})
-        cfg.peak_morphed_labels_hemis.update({hemi:morphed_label})
-        cfg.peak_times_hemis.update({hemi:peak_time})
+        peak_info[hemi] = {
+            "label": grown_label,
+            "morphed_label": morphed_label,
+            "time": peak_time,
+            "label_picture": fig
+        }
+    return peak_info
 
 def draw_label_from_stc(visit_dir,subjID_date,stc,label_to_draw_from = 'fs_drawn',mode = 'abs'):
+    peak_info={}
     for hemi in cfg.hemisphere:
         #load_labels
         if label_to_draw_from == 'fs_drawn': 
-            annot_label = morph_fslabel(cfg.labels_list[0],subjID_date,hemi)[0]
+            annot_label, fig = morph_fslabel(cfg.labels_list[0],subjID_date,hemi)
         elif label_to_draw_from == 'annot':
             parc = 'aparc.a2009s'
             annot_label = load_annot_labels(cfg.labels_list,subjID_date,parc,hemi,cfg.subj_dir)
         stc_from_annot_label = stc.in_label(annot_label)
         grown_label,morphed_label,label_fname,peak_time = find_peak_grow_label(stc_from_annot_label,hemi,cfg.peak_time_window[0],cfg.peak_time_window[1],5,subjID_date,'diff',visit_dir,mode=mode)
-        cfg.peak_labels_hemis.update({hemi:grown_label})
-        cfg.peak_morphed_labels_hemis.update({hemi:morphed_label})
-        cfg.peak_times_hemis.update({hemi:peak_time})
+        peak_info[hemi] = {
+            "label": grown_label,
+            "morphed_label": morphed_label,
+            "time": peak_time
+        }
+    return peak_info
 
-def save_peak_times(peak_times):
-    peak_times_df = pd.DataFrame.from_dict(peak_times,orient='index')
-    peak_times_df.index.name = 'Participant'
-    peak_times_df.to_csv(cfg.peak_times_savename,index=True)
+def save_peak_info(data):
+    data_to_save = [
+        {subject_id: peak_info}
+        for subject_id, peak_info, _ in data
+    ]
+    with open(cfg.peak_times_savename, "wb") as f:
+        pickle.dump(data_to_save, f)
 
 def load_epochs(file_tag,visit_dir,resample=False):
     load_fname = find_files(file_tag,visit_dir)[0]
@@ -1542,11 +1629,173 @@ def load_inverse_operator(file_tag,visit_dir):
     inverse_operator = mne.minimum_norm.read_inverse_operator(inv_path)
     return inverse_operator
 
-def generate_report():
-    if os.path.exists(cfg.report_savename_hdf5):
-        report = mne.open_report(cfg.report_savename_hdf5)
+def generate_report(inv = False):
+    if inv:
+        report_savename = cfg.inv_report_savename_hdf5
+        report_title = cfg.inv_report_title
     else:
-        report = mne.Report(title=cfg.report_title)
-        report.save(cfg.report_savename_hdf5, overwrite=True)
+        report_savename = cfg.report_savename_hdf5
+        report_title = cfg.report_title
+    if os.path.exists(report_savename):
+        report = mne.open_report(report_savename)
+    else:
+        report = mne.Report(title=report_title)
+        report.save(report_savename, overwrite=True)
 
     return report
+
+def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
+                        diagnosis, output_dir, alpha=0.05, paired=True,
+                        cmap='RdBu_r', vmin=None, vmax=None,
+                        return_masks=False):
+    """
+    Compare TF plots between two conditions and draw contours around significant differences.
+
+    Parameters
+    ----------
+    data_by_hemi : list of [data1, data2] pairs
+        Each item is a list or tuple: [cond1_data, cond2_data], shape = (n_subjects, freqs, times).
+        So the input is [[lh_search, lh_popout], [rh_search, rh_popout]].
+    x_axis : array-like
+        Driver frequency axis (e.g., 4–40 Hz) or time axis.
+    y_axis : array-like
+        Frequency axis.
+    titles : list of str
+        Titles for each panel (e.g., ['Left Hemisphere', 'Right Hemisphere']).
+    condition : str
+        Name of the condition for figure title.
+    output_dir : str
+        Where to save the figure.
+    alpha : float
+        Significance threshold.
+    paired : bool
+        Whether to use paired t-test.
+    hemi : str or None
+        Hemisphere label to include in file name.
+    cmap : str
+        Colormap for plotting.
+    vmin, vmax : float
+        Manual color limits.
+    return_masks : bool
+        Whether to return sig_masks and p_vals for further use.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+    savename : str
+    (optional) sig_masks : list of bool arrays
+    (optional) p_vals : list of float arrays
+    """
+    SMALL_SIZE = 22
+    plt.rcParams["font.family"] = "DejaVu Sans"
+    plt.rc('font', size=SMALL_SIZE)
+    plt.rc('axes', titlesize=SMALL_SIZE)
+    plt.rcParams['figure.constrained_layout.use'] = True
+    levels = np.linspace(cfg.crossfreq_plot_lims[0], cfg.crossfreq_plot_lims[1], cfg.crossfreq_plot_lims[2])
+
+    n_panels = len(data_by_hemi)
+    fig, ax = plt.subplots(1, n_panels, figsize=(6 * n_panels, 5))
+    if n_panels == 1:
+        ax = [ax]
+
+    sig_masks = []
+    pval_maps = []
+
+    for i, (data1, data2) in enumerate(data_by_hemi):
+        assert data1.shape == data2.shape, f"Shape mismatch in panel {i}"
+
+        if paired:
+            t_vals, p_vals = ttest_rel(data1, data2, axis=0)
+        else:
+            t_vals, p_vals = ttest_ind(data1, data2, axis=0)
+
+        diff = np.mean(data1 - data2, axis=0)
+        sig_mask = p_vals < alpha
+        sig_masks.append(sig_mask)
+        pval_maps.append(p_vals)
+
+        if vmin is None or vmax is None:
+            vmax_plot = np.max(np.abs(diff))
+            vmin = -vmax_plot
+            vmax = vmax_plot
+            levels = np.linspace(vmin, vmax, cfg.crossfreq_plot_lims[2])
+
+
+        cf = ax[i].contourf(x_axis, y_axis, diff.T, levels=levels,
+                            cmap=cmap, vmin=vmin, vmax=vmax, extend='both')
+        ax[i].set_title(titles[i])
+        if cfg.analysis_type == 'cross_freq':
+            ax[i].set_xlabel('Driving Frequency (Hz)')
+        else:
+            ax[i].set_xlabel('Time (s)')
+        if i == 0:
+            ax[i].set_ylabel('Frequency (Hz)')
+        else:
+            ax[i].set_yticklabels('')
+
+        # Draw significance contours
+        labeled, n_clusters = label(sig_mask.T)
+        for c in range(1, n_clusters + 1):
+            cluster = labeled == c
+            ax[i].contour(x_axis, y_axis, cluster, colors='k', linewidths=1.5)
+
+    # Shared colorbar
+    cbar = fig.colorbar(cf, ax=ax, label='Mean Difference', orientation='vertical', ticks=np.linspace(vmin, vmax, cfg.crossfreq_plot_lims[2]))
+
+    # Set figure title
+    full_title = "Comparing " + '-'.join([key.capitalize() for key in cfg.condition.keys()]) + f" ({diagnosis.upper()})"
+    fig.suptitle(full_title, fontsize=22)
+
+    # Save figure
+    fname_parts = list(filter(None, [diagnosis, 'tf', 'cluster', 'plot']))
+    savename = os.path.join(output_dir, '_'.join(fname_parts) + ".tiff")
+    fig.savefig(savename, dpi=300)
+    plt.close(fig)
+
+    if return_masks:
+        return fig, savename, sig_masks, pval_maps
+    return fig, savename
+
+def add_pacs_comparison_to_report(df,report,id):
+    low_fq_range = df["low_freqs"].values[0]
+    high_fq_range = df["high_freqs"].values[0]
+    image_names = []
+    for diagnosis in cfg.diagnoses:
+        df_diagnosis = df[df["Diagnosis"]==diagnosis]
+        datasets = []
+        for hemi in cfg.hemisphere:
+            hemi_dataset = []
+            for condition in cfg.condition:
+                df_to_plot = df_diagnosis[(df_diagnosis["hemisphere"]==hemi) & (df_diagnosis['Condition']==condition)]
+                if df_to_plot.empty:
+                    print(f"No data for {diagnosis} in {condition} for {hemi}. Skipping...")
+                    continue
+                all_data = np.stack(df_to_plot['pac'].values)
+                hemi_dataset.append(all_data)
+            datasets.append(hemi_dataset)
+        titles = ['Left Hemisphere', 'Right Hemisphere']
+
+        fig1, name = plot_tf_comparison(
+                    datasets, low_fq_range, high_fq_range, titles,
+                    diagnosis, cfg.output_dir, alpha=0.05, paired=True,
+                    cmap='RdBu_r', vmin=None, vmax=None,
+                    return_masks=False)
+        title = '_'.join([id,condition,'pac'])
+        #save fig
+        fig_to_save = fig1.get_figure()
+        fig_to_save.savefig(name.replace('.tiff','.svg'),format="svg")
+        fig_to_save.savefig(name,dpi=300)
+        image_names.append(name)
+        plt.close()
+    fig = plt.figure(figsize=(18,6), layout='constrained')
+    gs  = GridSpec(1, 2, figure=fig) 
+    ax1 = fig.add_subplot(gs[0,0])
+    ax2 = fig.add_subplot(gs[0,1])
+    ax1.imshow(plt.imread(image_names[0]))
+    ax1.axis('off')
+    ax2.imshow(plt.imread(image_names[1]))
+    ax2.axis('off')
+    title = '_'.join([id,condition,'pac_comparison'])
+    report.add_figure(fig=fig, title=title, section=id, tags=[condition,'pac'],replace=True)
+    report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
+    plt.close('all')

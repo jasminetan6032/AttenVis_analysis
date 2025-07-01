@@ -1,6 +1,4 @@
 import os
-import pandas as pd
-import matplotlib as plt
 
 local_dir = '/autofs/space/hypatia_002/users/Jasmine/'
 paradigm = 'AttenVis'
@@ -29,8 +27,8 @@ sensor_hemis = ['left','right']
 hemisphere = ['lh','rh']
 
 #what you're investigating: label, view of label and whether to use stimuli-locked or response-locked epochs
-labels_of_interest = ['DLPFC']
-brain_view = 'lateral'
+labels_of_interest = ['V1']
+brain_view = 'med'
 stimuli_or_response = 'stimuli'
 epochs_to_use_dict = {'stimuli': '_nobaseline_nofilter_all_conditions_metadata_epo.fif',
                  'response': '_nobaseline_nofilter_all_conditions_metadata_response_epo.fif'}
@@ -45,7 +43,7 @@ peak_labels_hemis = {key: {key:None for key in hemisphere} for key in hemisphere
 peak_morphed_labels_hemis = {key: {key:None for key in hemisphere} for key in hemisphere}
 
 overwrite_report = True
-overwrite_data = False
+overwrite_data = True
 overwrite_epochs = False
 redraw_labels = False
 
@@ -68,11 +66,12 @@ freq_min_plot = 4
 freq_max_plot = 40
 power_line_plot_ylims = (-0.2,0.3)
 vlines = [0.8]
+alpha = 0.05
 vmin = -1.0
 vmax = 1.0
 fontsize = 20
 confidence = 0.95 #ci interval for line plots
-ylims = (0,10)
+ylims = (0,15)
 zcoh_ylims = (-2.0,2.0)
 
 labels_dict = {
@@ -142,10 +141,11 @@ con_report_savename_html = os.path.join(output_dir,connectivity_save_fname+".htm
 con_report_savename_hdf5 = os.path.join(output_dir,connectivity_save_fname+".hdf5")
 
 inv_report_savename_hdf5 = os.path.join(data_dir,'_'.join([str(prestimulus_baseline[0]),str(prestimulus_baseline[1]),"prestim_inverses.hdf5"]))
-rt_report_savename_hdf5 = os.path.join(data_dir,"RTs_all_answers.hdf5")
-rt_data_savename = os.path.join(data_dir,"RTs_all_answers.pkl")
+rt_report_savename_hdf5 = os.path.join(data_dir,"RTs_clean_correct_answers.hdf5")
+rt_data_savename = os.path.join(data_dir,"RTs_clean_correct_answers.pkl")
 
 
+inv_report_title = 'AttenVis Prestimulus Inverses ' +  '-'.join([stimuli_or_response,'locked'])
 report_title = '_'.join(list(condition.keys()) + labels_of_interest + [con_method])
 
 color_dict = {"search":"orchid",
