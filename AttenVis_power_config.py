@@ -10,8 +10,11 @@ else:
 savedir = os.path.join(data_dir,'analyses',analysis_type)
 
 #experiment details 
-condition = {'search': {'label':'Search'},
-             'pop-out': {'label':'Pop-out'}}
+condition = {
+            'search': {'label':'Search'},
+            'pop-out': {'label':'Pop-out'}
+            #  'conditions_combined': {'label':'Combined'}
+             }
 difficulty = {'4': {'label':'4'},
             '6': {'label':'6'},
             '8': {'label':'8'},
@@ -27,14 +30,14 @@ sensor_hemis = ['left','right']
 hemisphere = ['lh','rh']
 
 #what you're investigating: label, view of label and whether to use stimuli-locked or response-locked epochs
-labels_of_interest = ['intraparietal']
-brain_view = 'lat'
-stimuli_or_response = 'response'
+labels_of_interest = ['cingulate']
+brain_view = 'med'
+stimuli_or_response = 'stimuli'
 epochs_to_use_dict = {'stimuli': '_nobaseline_nofilter_all_conditions_metadata_epo.fif', #-0.5 to 2.5s
                  'response': '_nobaseline_nofilter_all_conditions_metadata_response_epo.fif'} #-1.5 to 0.5s
 epochs_to_use = epochs_to_use_dict[stimuli_or_response]
 
-time_windows = [0.8, 1.3]#[-1.5,0.5]  # [0.9,1.2]
+time_windows = [0.8, 1.15]#[-1.5,0.5]  # [0.9,1.2]
 prestimulus_baseline = (-0.2, 0.0)
 
 peak_time_window = [0.9,1.2]
@@ -64,17 +67,18 @@ con_n_cycles  = 3
 sfreq         = 250
 snr           = 0.3
 lambda2       = 1.0 / snr**2
-baseline      = (-0.2,0.0)
+baseline      = (-0.5,0.0)
 
 #plotting settings
-tmin_plot               =  0.8 #-1.5 #-0.3
-tmax_plot               =  1.1 #0.5 #1.5
-freq_min_plot           = 4
+tmin_plot               =  -0.3 #-1.5 #-0.3
+tmax_plot               =  1.5 #0.5 #1.5
+freq_min_plot           = 4 #4
 freq_max_plot           = 40
 power_line_plot_ylims   = (-0.2,0.2)
-power_plot_lims         = [-0.1,0.1,80,5] #min, max, division,division for colorbar
+power_plot_lims         = [-0.05,0.05,80,5] #min, max, division,division for colorbar
 crossfreq_plot_lims     = [0,0.15,15,7] #min, max, division,division for colorbar
-vlines                  = [0.0]
+vlines                  = [0.0,0.8]
+alpha = 0.05
 vmin                    = -1.0
 vmax                    = 1.0
 fontsize                = 20
@@ -130,7 +134,7 @@ else:
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
-save_fname = '_'.join([analysis_type] + [stimuli_or_response] + [high_or_low_freq] + selected_conditions + labels_of_interest + [con_method]+[str(time_windows[0]),str(time_windows[1])]) # 
+save_fname = '_'.join([analysis_type] + [stimuli_or_response] + [high_or_low_freq] + list(condition.keys()) + labels_of_interest + [con_method]+[str(time_windows[0]),str(time_windows[1])]) # 
 data_fname = save_fname + '.pkl'
 data_savename = os.path.join(output_dir,data_fname)
 peak_times_savename = os.path.join(output_dir,save_fname + '_peak_times.pkl')

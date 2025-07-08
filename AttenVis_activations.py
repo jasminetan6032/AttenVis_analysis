@@ -64,26 +64,26 @@ debug = False
 if debug:
     n_jobs = 1
 
-# parallel, run_func, _ = parallel_func(get_activations_in_label, n_jobs=n_jobs)
-# results = parallel(run_func(subject) for subject in participants_to_study)
+parallel, run_func, _ = parallel_func(get_activations_in_label, n_jobs=n_jobs)
+results = parallel(run_func(subject) for subject in participants_to_study)
 
-# tlbx.save_peak_info(results)
+tlbx.save_peak_info(results)
 
 report = tlbx.generate_report()
 
-# for sub_id, peak_info, pics in results:
-#     diagnosis = participants_df[participants_df['Participant'] == sub_id]['Diagnosis'].values[0]
-#     for fig, hemi in pics:
-#         title = '_'.join([sub_id, hemi])
-#         report.add_figure(fig=fig, title=title, section=sub_id, tags=[hemi,'activations',diagnosis], replace=True)
-#         plt.close(fig)
+for sub_id, peak_info, pics in results:
+    diagnosis = participants_df[participants_df['Participant'] == sub_id]['Diagnosis'].values[0]
+    for fig, hemi in pics:
+        title = '_'.join([sub_id, hemi])
+        report.add_figure(fig=fig, title=title, section=sub_id, tags=[hemi,'activations',diagnosis], replace=True)
+        plt.close(fig)
 
-# report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
+report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
 
 df = tlbx.collate_participants_data(participants_df,participants_to_study)
 tlbx.add_gavg_activations_to_report(df,report,'gavg', cfg.diagnoses,'Diagnosis')
 tlbx.add_gavg_activations_to_report(df,report,'gavg', cfg.plot_selected_conditions,'Condition')
 
-# tlbx.add_fsaverage_to_report(report,df,cfg.labels_of_interest[0] + '_grown')
+tlbx.add_fsaverage_to_report(report,df,cfg.labels_of_interest[0] + '_grown')
 
 tlbx.show_report(cfg.report_savename_hdf5)

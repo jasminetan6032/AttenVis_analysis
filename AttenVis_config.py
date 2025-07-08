@@ -27,8 +27,8 @@ sensor_hemis = ['left','right']
 hemisphere = ['lh','rh']
 
 #what you're investigating: label, view of label and whether to use stimuli-locked or response-locked epochs
-labels_of_interest = ['V1']
-brain_view = 'med'
+labels_of_interest = ['central']
+brain_view = 'lat'
 stimuli_or_response = 'stimuli'
 epochs_to_use_dict = {'stimuli': '_nobaseline_nofilter_all_conditions_metadata_epo.fif',
                  'response': '_nobaseline_nofilter_all_conditions_metadata_response_epo.fif'}
@@ -71,7 +71,7 @@ vmin = -1.0
 vmax = 1.0
 fontsize = 20
 confidence = 0.95 #ci interval for line plots
-ylims = (0,15)
+ylims = (0,10)
 zcoh_ylims = (-2.0,2.0)
 
 labels_dict = {

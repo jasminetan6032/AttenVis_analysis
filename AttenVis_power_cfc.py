@@ -22,7 +22,7 @@ import AttenVis_power_config as cfg
 participants_df, participants_to_study = tlbx.load_participants()
 report = tlbx.generate_report()
 
-def get_pac_in_label(sub_id,overwrite_data=True):
+def get_pac_in_label(sub_id,overwrite_data=False):
     participant_data = []
     diagnosis, study,visit_dir,subjID_date = tlbx.read_participant_details_from_dataframe(participants_df,sub_id)
     participant_data_savename = os.path.join(visit_dir,cfg.data_fname.replace('.pkl','_' + sub_id + '.pkl'))
@@ -30,14 +30,14 @@ def get_pac_in_label(sub_id,overwrite_data=True):
         inverse_operator = tlbx.load_inverse_operator('_prestim_baseline_inv.fif',visit_dir)
         src = inverse_operator['src']
         
-        for condition in cfg.brain_selected_conditions:
-            file_tag_cond = '_AttenVis_nobaseline_nofilter_' + condition.replace('/','_') 
-            epo_load_fname = tlbx.find_files(file_tag_cond + '_clean_epo.fif',visit_dir)[0]
+        for condition in cfg.condition:
+            file_tag_cond = '_AttenVis_nobaseline_nofilter_metadata_' + condition.replace('/','_') 
+            epo_load_fname = tlbx.find_files(file_tag_cond + '_behaviour_cleaned_epo.fif',visit_dir)[0]
             print(epo_load_fname)
             epochs = mne.read_epochs(epo_load_fname)
             epochs   = epochs.resample(cfg.sfreq)
             baseline_evoked = tlbx.get_evoked(epochs,filter=None,baseline=None)
-            stc = mne.minimum_norm.apply_inverse(baseline_evoked, inverse_operator, cfg.lambda2, method=cfg.con_method, pick_ori=None, verbose=True)
+            stc = mne.minimum_norm.apply_inverse(baseline_evoked, inverse_operator, cfg.lambda2, method='MNE', pick_ori=None, verbose=True)
             stc = stc.crop(tmin=cfg.time_windows[0], tmax=cfg.time_windows[1])  # Crop to the desired time window
 
             for hemi in cfg.hemisphere:
@@ -48,7 +48,7 @@ def get_pac_in_label(sub_id,overwrite_data=True):
                         stc, label_restricted, src, mode ="mean", verbose="error"
                     )
                 #get pac
-                low_fq_range = np.linspace(6, 12, 20)
+                low_fq_range = np.linspace(4, 12, 20)
                 estimator = pactools.Comodulogram(fs=cfg.sfreq, low_fq_range=low_fq_range,
                                         low_fq_width=1, method=cfg.pac_method,
                                         progress_bar=False)        
@@ -83,5 +83,6 @@ df = tlbx.collate_participants_data(participants_df,participants_to_study)
 # participants_to_study = tlbx.update_participants_n(df,cfg.excluded_participants,cfg.paradigm)
 
 tlbx.add_pacs_to_report(df,report,'gavg')
-tlbx.add_pacs_comparison_to_report(df,report,'gavg')
+tlbx.add_pacs_comparison_to_report(df,report,'gavg',analysis_type = 'within_group')
+tlbx.add_pacs_comparison_to_report(df,report,'gavg',analysis_type = 'between_group')
 tlbx.show_report(cfg.report_savename_hdf5)

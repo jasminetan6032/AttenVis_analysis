@@ -708,7 +708,7 @@ def plot_line(df,variable,ax,label,color,freqs = None,ci=False,group=False):
 
     return ax
 
-def compute_sig_mask(df, factor_name, variable='stc', alpha=0.05, paired=False):
+def compute_sig_mask(df, factor_name, variable='stc', alpha=0.05, paired=False,freqs = None,fdr = True):
     """
     Computes a significance mask across time points between levels of a categorical variable.
 
@@ -738,15 +738,22 @@ def compute_sig_mask(df, factor_name, variable='stc', alpha=0.05, paired=False):
         P-values at each time point.
     """
     data_by_level = []
+    if freqs is not None:
+        freq_to_plot = [np.where(np.arange(cfg.freq_min,cfg.freq_max+1,1)==freqs[0])[0][0],np.where(np.arange(cfg.freq_min,cfg.freq_max+1,1)==freqs[1])[0][0]]
 
     for level in cfg.df_varnames[factor_name]:
-        series_list = df[df[factor_name] == level][variable].to_list()
-        arr = np.vstack(series_list)  # shape: (n_subjects, n_times)
+        if freqs is not None:
+            series_list = np.stack(df[df[factor_name] == level][variable].values)
+            data = series_list[:,freq_to_plot[0]:freq_to_plot[1],:]
+            arr = np.mean(data, axis=1)# shape: (n_subjects, n_times)
+        else:
+            data = df[df[factor_name] == level][variable].to_list()
+            arr = np.vstack(data)  # shape: (n_subjects, n_times)
         data_by_level.append(arr)
 
     n_times = data_by_level[0].shape[1]
 
-    if len(levels) == 2:
+    if len(cfg.df_varnames[factor_name]) == 2:
         data1, data2 = data_by_level
         if paired:
             from scipy.stats import ttest_rel
@@ -760,7 +767,10 @@ def compute_sig_mask(df, factor_name, variable='stc', alpha=0.05, paired=False):
             for t in range(n_times)
         ])
     rej, p_vals_corr = fdrcorrection(p_vals, alpha=alpha, method='indep', is_sorted=False)
-    sig_mask = rej #p_vals < alpha
+    if fdr:
+        sig_mask = rej
+    else:
+        sig_mask = p_vals < alpha
     time = df['time'].values[0]
     time_to_plot = [find_nearest(time,cfg.tmin_plot),find_nearest(time,cfg.tmax_plot)]
     time_for_plot_sig_mask = sig_mask[time_to_plot[0]:time_to_plot[1]]
@@ -1036,7 +1046,7 @@ def plot_power_over_time(ax,df,tag,factor_name_in_df,freqs,group=False,highlight
         title = plot_title + tag + ' \n '
         ax.set_title(title,fontsize=16)
     if sig_mask is not None:
-        sig_mask, p_vals = compute_sig_mask(df, factor_name_in_df, variable='stc', alpha=cfg.alpha, paired=paired)
+        sig_mask, p_vals = compute_sig_mask(df, factor_name_in_df, variable='power', alpha=cfg.alpha, paired=paired,freqs=freqs)
     add_significance_bar(ax, sig_mask, time_for_plot)
 
     return ax
@@ -1058,9 +1068,9 @@ def add_gavg_power_over_time_to_report(df,report,id,factor_name_in_df,freq_label
             hemi_tag = ' (' + hemi.upper() + ')'
             df_to_plot = df[(df[factor_name_in_df] == factor_level) & (df['hemisphere'] == hemi)]
             if factor_name_in_df == 'Condition':
-                plot_power_over_time(hemi_axes[hemi],df_to_plot,factor_level + hemi_tag,'Diagnosis',freqs, ylims=ylims,group=True,plot_title=plot_title,ci=ci)
+                plot_power_over_time(hemi_axes[hemi],df_to_plot,factor_level + hemi_tag,'Diagnosis',freqs, ylims=ylims,group=True,plot_title=plot_title,ci=ci, sig_mask=True,paired=False)
             elif factor_name_in_df == 'Diagnosis':
-                plot_power_over_time(hemi_axes[hemi],df_to_plot,factor_level + hemi_tag,'Condition',freqs, ylims=ylims,group=True,plot_title=plot_title, ci=ci)
+                plot_power_over_time(hemi_axes[hemi],df_to_plot,factor_level + hemi_tag,'Condition',freqs, ylims=ylims,group=True,plot_title=plot_title, ci=ci, sig_mask=True,paired=True)
 
         title = '_'.join([id,factor_level,report_tag])
 
@@ -1645,9 +1655,9 @@ def generate_report(inv = False):
     return report
 
 def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
-                        diagnosis, output_dir, alpha=0.05, paired=True,
+                        grouping_label, output_dir, alpha=0.05, paired=True,
                         cmap='RdBu_r', vmin=None, vmax=None,
-                        return_masks=False):
+                        return_masks=False,data_type = 'tf',add_vlines = False):
     """
     Compare TF plots between two conditions and draw contours around significant differences.
 
@@ -1691,7 +1701,7 @@ def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
     plt.rc('font', size=SMALL_SIZE)
     plt.rc('axes', titlesize=SMALL_SIZE)
     plt.rcParams['figure.constrained_layout.use'] = True
-    levels = np.linspace(cfg.crossfreq_plot_lims[0], cfg.crossfreq_plot_lims[1], cfg.crossfreq_plot_lims[2])
+    levels = np.linspace(cfg.power_plot_lims[0], cfg.power_plot_lims[1], cfg.power_plot_lims[2])
 
     n_panels = len(data_by_hemi)
     fig, ax = plt.subplots(1, n_panels, figsize=(6 * n_panels, 5))
@@ -1700,19 +1710,28 @@ def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
 
     sig_masks = []
     pval_maps = []
-
+    x_lims = [cfg.tmin_plot, cfg.tmax_plot]
     for i, (data1, data2) in enumerate(data_by_hemi):
-        assert data1.shape == data2.shape, f"Shape mismatch in panel {i}"
+        # assert data1.shape == data2.shape, f"Shape mismatch in panel {i}"
 
         if paired:
             t_vals, p_vals = ttest_rel(data1, data2, axis=0)
+            diff = np.mean(data1 - data2, axis=0)
         else:
             t_vals, p_vals = ttest_ind(data1, data2, axis=0)
-
-        diff = np.mean(data1 - data2, axis=0)
+            diff = np.mean(data1,axis=0) - np.mean(data2, axis=0)
         sig_mask = p_vals < alpha
-        sig_masks.append(sig_mask)
-        pval_maps.append(p_vals)
+
+        if data_type == 'pac':
+            diff_to_plot = diff.T
+            sig_mask_to_plot = sig_mask.T
+            p_vals_to_plot = p_vals.T
+        else:
+            diff_to_plot = diff
+            sig_mask_to_plot = sig_mask
+            p_vals_to_plot = p_vals
+        sig_masks.append(sig_mask_to_plot)
+        pval_maps.append(p_vals_to_plot)
 
         if vmin is None or vmax is None:
             vmax_plot = np.max(np.abs(diff))
@@ -1721,8 +1740,13 @@ def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
             levels = np.linspace(vmin, vmax, cfg.crossfreq_plot_lims[2])
 
 
-        cf = ax[i].contourf(x_axis, y_axis, diff.T, levels=levels,
+        cf = ax[i].contourf(x_axis, y_axis, diff_to_plot, levels=levels,
                             cmap=cmap, vmin=vmin, vmax=vmax, extend='both')
+        if add_vlines:
+            for line in cfg.vlines:
+                ax[i].axvline(x=line, color='black', linestyle='--', linewidth=1)
+        if cfg.analysis_type == 'power':
+            ax[i].set_xlim(x_lims)
         ax[i].set_title(titles[i])
         if cfg.analysis_type == 'cross_freq':
             ax[i].set_xlabel('Driving Frequency (Hz)')
@@ -1734,7 +1758,7 @@ def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
             ax[i].set_yticklabels('')
 
         # Draw significance contours
-        labeled, n_clusters = label(sig_mask.T)
+        labeled, n_clusters = label(sig_mask_to_plot)
         for c in range(1, n_clusters + 1):
             cluster = labeled == c
             ax[i].contour(x_axis, y_axis, cluster, colors='k', linewidths=1.5)
@@ -1743,11 +1767,14 @@ def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
     cbar = fig.colorbar(cf, ax=ax, label='Mean Difference', orientation='vertical', ticks=np.linspace(vmin, vmax, cfg.crossfreq_plot_lims[2]))
 
     # Set figure title
-    full_title = "Comparing " + '-'.join([key.capitalize() for key in cfg.condition.keys()]) + f" ({diagnosis.upper()})"
+    if paired:
+        full_title = "Comparing " + '-'.join([key.capitalize() for key in cfg.condition.keys()]) + f" ({grouping_label.upper()})"
+    else:
+        full_title = "Comparing " + '-'.join([key.upper() for key in cfg.diagnoses]) + f" ({grouping_label.capitalize()})"
     fig.suptitle(full_title, fontsize=22)
 
     # Save figure
-    fname_parts = list(filter(None, [diagnosis, 'tf', 'cluster', 'plot']))
+    fname_parts = list(filter(None, [grouping_label, 'tf', 'cluster', 'plot']))
     savename = os.path.join(output_dir, '_'.join(fname_parts) + ".tiff")
     fig.savefig(savename, dpi=300)
     plt.close(fig)
@@ -1756,9 +1783,87 @@ def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
         return fig, savename, sig_masks, pval_maps
     return fig, savename
 
-def add_pacs_comparison_to_report(df,report,id):
+def add_pacs_comparison_to_report(df,report,id, analysis_type='within_group'):
     low_fq_range = df["low_freqs"].values[0]
     high_fq_range = df["high_freqs"].values[0]
+    image_names = []
+    if analysis_type == 'within_group':
+        for diagnosis in cfg.diagnoses:
+            datasets = []
+            for hemi in cfg.hemisphere:
+                hemi_dataset = []
+                for condition in cfg.condition:
+                    df_to_plot = df[(df["hemisphere"]==hemi) & (df['Condition']==condition)& (df['Diagnosis']==diagnosis)]
+                    if df_to_plot.empty:
+                        print(f"No data for {diagnosis} in {condition} for {hemi}. Skipping...")
+                        continue
+                    all_data = np.stack(df_to_plot['pac'].values)
+                    hemi_dataset.append(all_data)
+                datasets.append(hemi_dataset)
+            titles = ['Left Hemisphere', 'Right Hemisphere']
+
+            fig1, name = plot_tf_comparison(
+                        datasets, low_fq_range, high_fq_range, titles,
+                        diagnosis, cfg.output_dir, alpha=0.05, paired=True,
+                        cmap='RdBu_r', vmin=None, vmax=None,data_type='pac',
+                        return_masks=False)
+            title = '_'.join([id,condition,'pac'])
+            #save fig
+            fig_to_save = fig1.get_figure()
+            fig_to_save.savefig(name.replace('.tiff','.svg'),format="svg")
+            fig_to_save.savefig(name,dpi=300)
+            image_names.append(name)
+            plt.close()
+    elif analysis_type == 'between_group':
+        for condition in cfg.condition:
+            datasets = []
+            for hemi in cfg.hemisphere:
+                hemi_dataset = []
+                for diagnosis in cfg.diagnoses:
+                    df_to_plot = df[(df["hemisphere"]==hemi) & (df['Condition']==condition) & (df['Diagnosis']==diagnosis)]
+                    if df_to_plot.empty:
+                        print(f"No data for {diagnosis} in {condition} for {hemi}. Skipping...")
+                        continue
+                    all_data = np.stack(df_to_plot['pac'].values)
+                    hemi_dataset.append(all_data)
+                datasets.append(hemi_dataset)
+            titles = ['Left Hemisphere', 'Right Hemisphere']
+
+            fig1, name = plot_tf_comparison(
+                        datasets, low_fq_range, high_fq_range, titles,
+                        condition, cfg.output_dir, alpha=0.05, paired=False,
+                        cmap='RdBu_r', vmin=None, vmax=None,data_type='pac',
+                        return_masks=False)
+            title = '_'.join([id,condition,'pac'])
+            #save fig
+            fig_to_save = fig1.get_figure()
+            fig_to_save.savefig(name.replace('.tiff','.svg'),format="svg")
+            fig_to_save.savefig(name,dpi=300)
+            image_names.append(name)
+            plt.close()
+
+    n_images = len(image_names)
+
+    fig = plt.figure(figsize=(6 * n_images, 6), layout='constrained')
+    gs = GridSpec(1, n_images, figure=fig)
+
+    axes = []
+    for i in range(n_images):
+        ax = fig.add_subplot(gs[0, i])
+        ax.imshow(plt.imread(image_names[i]))
+        ax.axis('off')
+        axes.append(ax)
+    title = '_'.join([id,analysis_type,'pac_comparison'])
+    report.add_figure(fig=fig, title=title, section=id, tags=['pac'],replace=True)
+    report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
+    plt.close('all')
+
+def add_tfrs_comparison_to_report(df,report,id,data_type = 'tf'):
+    time = df['time'].values[0]
+    time_to_plot = [find_nearest(time,cfg.tmin_plot),find_nearest(time,cfg.tmax_plot)]
+    time_for_plot = time[time_to_plot[0]:time_to_plot[1]]
+    freqs = np.arange(cfg.freq_min,cfg.freq_max+1,1)
+    freq_to_plot = [np.where(freqs==cfg.freq_min_plot)[0][0],np.where(freqs==cfg.freq_max_plot)[0][0]]
     image_names = []
     for diagnosis in cfg.diagnoses:
         df_diagnosis = df[df["Diagnosis"]==diagnosis]
@@ -1770,16 +1875,20 @@ def add_pacs_comparison_to_report(df,report,id):
                 if df_to_plot.empty:
                     print(f"No data for {diagnosis} in {condition} for {hemi}. Skipping...")
                     continue
-                all_data = np.stack(df_to_plot['pac'].values)
-                hemi_dataset.append(all_data)
+                if data_type == 'pac':
+                    data = np.stack(df_to_plot['pac'].values)
+                else:
+                    all_data = np.stack(df_to_plot['power'].values)
+                    data = all_data[:,freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
+                hemi_dataset.append(data)
             datasets.append(hemi_dataset)
         titles = ['Left Hemisphere', 'Right Hemisphere']
 
         fig1, name = plot_tf_comparison(
-                    datasets, low_fq_range, high_fq_range, titles,
+                    datasets, time_for_plot, freqs[freq_to_plot[0]:freq_to_plot[1]], titles,
                     diagnosis, cfg.output_dir, alpha=0.05, paired=True,
-                    cmap='RdBu_r', vmin=None, vmax=None,
-                    return_masks=False)
+                    cmap='RdBu_r', vmin=None, vmax=None,data_type=data_type,
+                    return_masks=False,add_vlines=True)
         title = '_'.join([id,condition,'pac'])
         #save fig
         fig_to_save = fig1.get_figure()
@@ -1795,7 +1904,7 @@ def add_pacs_comparison_to_report(df,report,id):
     ax1.axis('off')
     ax2.imshow(plt.imread(image_names[1]))
     ax2.axis('off')
-    title = '_'.join([id,condition,'pac_comparison'])
-    report.add_figure(fig=fig, title=title, section=id, tags=[condition,'pac'],replace=True)
+    title = '_'.join([id,'tfr_comparison'])
+    report.add_figure(fig=fig, title=title, section=id, tags=['tfr'],replace=True)
     report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
     plt.close('all')
