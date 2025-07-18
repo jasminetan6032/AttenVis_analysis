@@ -34,7 +34,7 @@ epochs_to_use_dict = {'stimuli': '_nobaseline_nofilter_all_conditions_metadata_e
                  'response': '_nobaseline_nofilter_all_conditions_metadata_response_epo.fif'}
 epochs_to_use = epochs_to_use_dict[stimuli_or_response]
 
-time_windows = [0,2.5]  #[-0.5,2.5]
+time_windows = [0,1.5]  #[-0.5,2.5]
 prestimulus_baseline = (-0.2, 0.0)
 
 peak_time_window = [0.9,1.2]
@@ -64,9 +64,9 @@ tmin_plot = 0
 tmax_plot = 1.5
 freq_min_plot = 4
 freq_max_plot = 40
-power_plot_lims         = [-0.3,0.3,40,5] #min, max, division,division for colorbar
+power_plot_lims         = [0,0.25,40,5] #min, max, division,division for colorbar
 power_line_plot_ylims = (-0.2,0.3)
-vlines = [0.8]
+vlines = [0.8,1.15]
 alpha = 0.05
 vmin = -1.0
 vmax = 1.0

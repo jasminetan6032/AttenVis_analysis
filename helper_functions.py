@@ -729,7 +729,7 @@ def plot_line(df,variable,ax,label,color,freqs = None,ci=False,group=False):
 
     return ax
 
-def compute_sig_mask(df, factor_name, variable='stc', alpha=0.05, paired=False,freqs = None,fdr = False):
+def compute_sig_mask(df, factor_name, variable='stc', alpha=0.05, paired=False,freqs = None,fdr = True):
     """
     Computes a significance mask across time points between levels of a categorical variable.
 
@@ -787,7 +787,7 @@ def compute_sig_mask(df, factor_name, variable='stc', alpha=0.05, paired=False,f
             f_oneway(*(group[:, t] for group in data_by_level))[1]
             for t in range(n_times)
         ])
-    rej, p_vals_corr = fdrcorrection(p_vals, alpha=alpha, method='indep', is_sorted=False)
+    rej, p_vals_corr = fdrcorrection(p_vals, alpha=alpha, method='n', is_sorted=False)
     if fdr:
         sig_mask = rej
     else:
@@ -1744,7 +1744,7 @@ def generate_report(inv = False):
 
 def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
                         grouping_label, output_dir, alpha=0.05, paired=True,
-                        cmap='RdBu_r', vmin=None, vmax=None,sig_mask = True,
+                        cmap='plasma', vmin=0, vmax=0.75,sig_mask = True, fdr = False, #'RdBu_r'
                         return_masks=False,data_type = 'tf',add_vlines = False,analysis_type=False):
     """
     Compare TF plots between two conditions and draw contours around significant differences.
@@ -1789,7 +1789,7 @@ def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
     plt.rc('font', size=SMALL_SIZE)
     plt.rc('axes', titlesize=SMALL_SIZE)
     plt.rcParams['figure.constrained_layout.use'] = True
-    levels = np.linspace(cfg.power_plot_lims[0], cfg.power_plot_lims[1], cfg.power_plot_lims[2])
+    levels = np.linspace(0,1,100) #(cfg.power_plot_lims[0], cfg.power_plot_lims[1], cfg.power_plot_lims[2])
 
     n_panels = len(data_by_hemi)
     fig, ax = plt.subplots(1, n_panels, figsize=(6 * n_panels, 5))
@@ -1810,7 +1810,11 @@ def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
                 else:
                     t_vals, p_vals = ttest_ind(data1, data2, axis=0)
                     diff = np.mean(data1,axis=0) - np.mean(data2, axis=0)
-                computed_sig_mask = p_vals < alpha
+                if fdr:
+                    rej, p_vals_corr = fdrcorrection(p_vals.flatten(), alpha=alpha, method='n', is_sorted=False)
+                    computed_sig_mask = rej.reshape(p_vals.shape)
+                else:
+                    computed_sig_mask = p_vals < alpha
             else:  # sig_mask == False → don't plot
                 computed_sig_mask = None
         elif isinstance(sig_mask, np.ndarray):
@@ -1826,6 +1830,8 @@ def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
             diff_to_plot = diff
             sig_mask_to_plot = sig_mask
             p_vals_to_plot = p_vals
+        if fdr:
+            p_vals_to_plot = p_vals_corr.reshape(p_vals.shape)
         sig_masks.append(sig_mask_to_plot)
         pval_maps.append(p_vals_to_plot)
 
@@ -1836,7 +1842,7 @@ def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
             levels = np.linspace(vmin, vmax, cfg.crossfreq_plot_lims[2])
 
 
-        cf = ax[i].contourf(x_axis, y_axis, diff_to_plot, levels=levels,
+        cf = ax[i].contourf(x_axis, y_axis, p_vals_to_plot, levels=levels,
                             cmap=cmap, vmin=vmin, vmax=vmax, extend='both')
         if add_vlines:
             for line in cfg.vlines:
@@ -1861,7 +1867,8 @@ def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
                 ax[i].contour(x_axis, y_axis, cluster, colors='k', linewidths=1.5)
 
     # Shared colorbar
-    cbar = fig.colorbar(cf, ax=ax, label='Mean Difference', orientation='vertical', ticks=np.linspace(vmin, vmax, cfg.crossfreq_plot_lims[2]))
+    cbar = fig.colorbar(cf, ax=ax, label='Mean Difference', orientation='vertical', ticks=[0, 0.05, 0.5, 0.75]) #np.linspace(vmin, vmax, cfg.crossfreq_plot_lims[2])
+    cbar.ax.set_yticklabels(['0', '0.05', '0.5', '0.75'])
 
     # Set figure title
     if analysis_type == 'interaction':
@@ -1991,7 +1998,7 @@ def add_tfrs_comparison_to_report(df,report,id,analysis_type='within_group',hemi
             fig1, name = plot_tf_comparison(
                         datasets, time_for_plot, freqs[freq_to_plot[0]:freq_to_plot[1]], titles,
                         diagnosis, cfg.output_dir, alpha=0.05, paired=True,
-                        cmap='RdBu_r', vmin=None, vmax=None,data_type='tf',
+                        cmap= 'plasma_r', data_type='tf', #'RdBu_r'
                         return_masks=False,add_vlines=True)
             #save fig
             fig_to_save = fig1.get_figure()
@@ -2024,7 +2031,7 @@ def add_tfrs_comparison_to_report(df,report,id,analysis_type='within_group',hemi
             fig1, name = plot_tf_comparison(
                         datasets, time_for_plot, freqs[freq_to_plot[0]:freq_to_plot[1]], titles,
                         condition, cfg.output_dir, alpha=0.05, paired=False,
-                        cmap='RdBu_r', vmin=None, vmax=None,data_type='tf',
+                        cmap='plasma_r', data_type='tf', #'RdBu_r'
                         return_masks=False,add_vlines=True)
             #save fig
             fig_to_save = fig1.get_figure()
@@ -2040,7 +2047,10 @@ def add_tfrs_comparison_to_report(df,report,id,analysis_type='within_group',hemi
     ax1.axis('off')
     ax2.imshow(plt.imread(image_names[1]))
     ax2.axis('off')
-    title = '_'.join([id,analysis_type,hemi_label,'tfr_comparison'])
+    if hemi_label is None:
+        title = '_'.join([id,analysis_type,'tfr_comparison'])
+    else:
+        title = '_'.join([id,analysis_type,hemi_label,'tfr_comparison'])
     report.add_figure(fig=fig, title=title, section=id, tags=['tfr'],replace=True)
     report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
     plt.close('all')
@@ -2098,7 +2108,7 @@ def add_interaction_plot_to_report(df,report,id):
     data_by_hemi = []
     for hemi in cfg.hemisphere:
         # Prepare data for each diagnosis and condition
-        diagnosis_list = {}
+        diagnosis_list = []
         for diagnosis in cfg.diagnoses:
             cond_list = []
             for condition in cfg.condition:
@@ -2113,10 +2123,9 @@ def add_interaction_plot_to_report(df,report,id):
         data_by_hemi.append(diagnosis_list)
         # Compute interaction plot
         fig = plot_interaction_tfr(
-            data_by_hemi, list(cfg.condition),
+            data_by_hemi,
             time_for_plot, 
-            freqs[freq_to_plot[0]:freq_to_plot[1]],
-            title=f'Group × Condition Interaction TFR ({hemi.upper()})'
+            freqs[freq_to_plot[0]:freq_to_plot[1]]
         )
         savename = os.path.join(cfg.output_dir, f"{id}_{hemi}_interaction_tfr.tiff")
         fig.savefig(savename, dpi=300)
@@ -2134,3 +2143,78 @@ def add_interaction_plot_to_report(df,report,id):
     title = '_'.join([id,cfg.analysis_type,'interaction_tfr_comparison'])
     report.add_figure(fig=fig, title=title, section=id, tags=['interaction', 'tfr'], replace=True)
     report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
+
+
+import statsmodels.api as sm
+from patsy import dmatrix
+
+
+def run_glm(data, metadata_df, formula, return_design=False, verbose=True):
+    """
+    Run GLM on time series (2D) or time-frequency data (3D) per time or time-freq point.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        Shape (n_obs, n_times) or (n_obs, n_freqs, n_times)
+    metadata_df : pd.DataFrame
+        DataFrame with predictors for each observation (subject/trial)
+    formula : str
+        Patsy formula for design matrix, e.g., 'C(group) * C(condition) + age'
+    return_design : bool
+        Whether to return design matrix and predictor names
+    verbose : bool
+
+    Returns
+    -------
+    betas : np.ndarray
+        Shape (n_predictors, n_times) or (n_predictors, n_freqs, n_times)
+    pvals : np.ndarray
+        Same shape as betas
+    (optionally) predictor_names : list[str]
+    (optionally) design_matrix : pd.DataFrame
+    """
+    n_obs = data.shape[0]
+
+    # Build design matrix
+    design = dmatrix(formula, data=metadata_df, return_type='dataframe')
+    predictor_names = design.columns.tolist()
+    n_predictors = design.shape[1]
+
+    if verbose:
+        print(f"Design matrix shape: {design.shape}, predictors: {predictor_names}")
+        print(f"Data shape: {data.shape}")
+
+    # Flatten data to 2D: (n_obs, features)
+    if data.ndim == 2:
+        # Time series
+        n_times = data.shape[1]
+        data_flat = data
+    elif data.ndim == 3:
+        # Time-frequency
+        n_freqs, n_times = data.shape[1], data.shape[2]
+        data_flat = data.reshape(n_obs, -1)  # (n_obs, n_freqs * n_times)
+    else:
+        raise ValueError("Data must be 2D or 3D array")
+
+    betas = np.empty((n_predictors, data_flat.shape[1]))
+    pvals = np.empty((n_predictors, data_flat.shape[1]))
+
+    for i in range(data_flat.shape[1]):
+        y = data_flat[:, i]
+        model = sm.OLS(y, design).fit()
+        betas[:, i] = model.params.values
+        pvals[:, i] = model.pvalues.values
+
+    # Reshape betas/pvals back to original data shape with predictors axis first
+    if data.ndim == 2:
+        betas = betas.reshape(n_predictors, n_times)
+        pvals = pvals.reshape(n_predictors, n_times)
+    else:
+        betas = betas.reshape(n_predictors, n_freqs, n_times)
+        pvals = pvals.reshape(n_predictors, n_freqs, n_times)
+
+    if return_design:
+        return betas, pvals, predictor_names, design
+    else:
+        return betas, pvals

@@ -63,22 +63,22 @@ def get_power_in_label(sub_id,overwrite_data=False):
         df_participant = pd.read_pickle(participant_data_savename)
         pics = tlbx.plot_participant_tfrs(df_participant,sub_id)
     return sub_id, pics
-n_jobs = 8
+# n_jobs = 8
 
-debug = False
-# participants_to_study = ['008301','009901','011201','011301','011302']
-if debug:
-    n_jobs = 1
+# debug = False
+# # participants_to_study = ['008301','009901','011201','011301','011302']
+# if debug:
+#     n_jobs = 1
 
-parallel, run_func, _ = parallel_func(get_power_in_label, n_jobs=n_jobs)
-results = parallel(run_func(subject) for subject in participants_to_study)
+# parallel, run_func, _ = parallel_func(get_power_in_label, n_jobs=n_jobs)
+# results = parallel(run_func(subject) for subject in participants_to_study)
 
 report = tlbx.generate_report()
 
-for sub_id, pics in results:
-    for pic, title, condition in pics:
-        report.add_figure(fig=pic, title=title, section=sub_id, tags=[condition,'power'], replace=True)
-        plt.close(pic)
+# for sub_id, pics in results:
+#     for pic, title, condition in pics:
+#         report.add_figure(fig=pic, title=title, section=sub_id, tags=[condition,'power'], replace=True)
+#         plt.close(pic)
 
 report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
 
@@ -101,7 +101,7 @@ tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Condition','Beta',(13,
 # tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Diagnosis','Gamma',(60,80),ci=False)
 # tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Condition','Gamma',(60,80),ci=False)
 
-tlbx.add_interaction_plot_to_report(df,report,'gavg')
+# tlbx.add_interaction_plot_to_report(df,report,'gavg')
 
 # tlbx.add_fsaverage_to_report(report,df,cfg.labels_of_interest[0] + '_grown')
 
