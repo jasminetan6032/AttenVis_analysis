@@ -19,7 +19,7 @@ import AttenVis_config as cfg
 
 participants_df, participants_to_study = tlbx.load_participants()
 
-def get_activations_in_label(sub_id,overwrite_data=True):
+def get_activations_in_label(sub_id,overwrite_data=False):
     participant_data = []
     diagnosis, study,visit_dir,subjID_date = tlbx.read_participant_details_from_dataframe(participants_df,sub_id)
     participant_data_savename = os.path.join(visit_dir,cfg.data_fname.replace('.pkl','_' + sub_id + '.pkl'))
@@ -27,7 +27,7 @@ def get_activations_in_label(sub_id,overwrite_data=True):
         load_fname, epochs = tlbx.load_epochs(cfg.epochs_to_use,visit_dir,resample=True)
         cleaned_epochs, summary = tlbx.clean_epochs_by_behaviour(epochs, rt_based=(0.1,1.2), percent=None, correct_answers_only=True)
         inverse_operator = tlbx.load_inverse_operator('_prestim_baseline_inv.fif',visit_dir)
-        peak_info = tlbx.draw_label_from_epochs(visit_dir,subjID_date,cleaned_epochs,inverse_operator,label_to_draw_from = 'fs_drawn',filter=(1,30))
+        peak_info = tlbx.draw_label_from_epochs(visit_dir,subjID_date,cleaned_epochs,inverse_operator,label_to_draw_from = 'annot',filter=(1,30))
         #get brain pics
         for condition in cfg.brain_selected_conditions:
             condition_tag = "(Condition == '" + condition + "')"
@@ -56,18 +56,19 @@ def get_activations_in_label(sub_id,overwrite_data=True):
 
     else:
         df_participant = pd.read_pickle(participant_data_savename)
+        peak_info = []
         pics = tlbx.plot_participant_activations(df_participant)
     return sub_id,peak_info,pics
-n_jobs = 6
+n_jobs = 8
 
-debug = False
+debug = True
 if debug:
     n_jobs = 1
 
 parallel, run_func, _ = parallel_func(get_activations_in_label, n_jobs=n_jobs)
 results = parallel(run_func(subject) for subject in participants_to_study)
 
-tlbx.save_peak_info(results)
+# tlbx.save_peak_info(results)
 
 report = tlbx.generate_report()
 

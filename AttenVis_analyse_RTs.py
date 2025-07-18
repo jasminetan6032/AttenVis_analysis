@@ -5,7 +5,7 @@ import AttenVis_config as cfg
 from mne.parallel import parallel_func
 import matplotlib.pyplot as plt    
 
-overwrite_data = False
+overwrite_data = True
 participants_df, participants_to_study = tlbx.load_participants()
 if cfg.rt_report_savename_hdf5 is None:
     report = mne.Report(title='AttenVis Reaction Times')
@@ -15,10 +15,7 @@ else:
 
 def analyse_RTs(sub_id):
     #load epochs
-    visit_dir = participants_df[participants_df['Participant'] == sub_id]['Visit_Dir'].values[0]
-    diagnosis = participants_df[participants_df['Participant'] == sub_id]['Diagnosis'].values[0]
-    study = participants_df[participants_df['Participant'] == sub_id]['Study'].values[0]
-    subjID_date = participants_df[participants_df['Participant'] == sub_id]['SubjID_Date'].values[0]
+    diagnosis, study,visit_dir,subjID_date = tlbx.read_participant_details_from_dataframe(participants_df,sub_id)
     load_fname, epochs = tlbx.load_epochs('_nobaseline_nofilter_all_conditions_metadata_epo.fif',visit_dir,resample=True)
     metadata = epochs.metadata
     metadata['Participant'] = sub_id
@@ -26,14 +23,14 @@ def analyse_RTs(sub_id):
     metadata['Study'] = study
     metadata['SubjID_Date'] = subjID_date
 
-    cleaned_metadata,summary = tlbx.clean_metadata(metadata,rt_based=(0.15,1.2), percent=None, correct_answers_only=True)
-    hist_fig = tlbx.plot_participant_RT_hist(metadata, cleaned_metadata)
-    RT_fig = tlbx.plot_RT(cleaned_metadata)
-    return sub_id, cleaned_metadata, summary, hist_fig, RT_fig
+    # cleaned_metadata,summary = tlbx.clean_metadata(metadata,rt_based=(0.15,1.2), percent=None, correct_answers_only=True)
+    # hist_fig = tlbx.plot_participant_RT_hist(metadata, cleaned_metadata)
+    # RT_fig = tlbx.plot_RT(cleaned_metadata)
+    return sub_id, metadata,len(epochs) #cleaned_metadata, summary, hist_fig, RT_fig
 
 n_jobs = 6
 
-debug = True
+debug = False
 if debug:
     n_jobs = 1
 

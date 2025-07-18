@@ -21,7 +21,7 @@ import AttenVis_power_config as cfg
 
 participants_df, participants_to_study = tlbx.load_participants()
 
-def get_power_in_label(sub_id,overwrite_data=True):
+def get_power_in_label(sub_id,overwrite_data=False):
     participant_data = []
     diagnosis, study,visit_dir,subjID_date = tlbx.read_participant_details_from_dataframe(participants_df,sub_id)
     participant_data_savename = os.path.join(visit_dir,cfg.data_fname.replace('.pkl','_' + sub_id + '.pkl'))
@@ -87,15 +87,21 @@ df = tlbx.collate_participants_data(participants_df,participants_to_study)
 mpl.rcParams["svg.fonttype"] = "none"
 
 tlbx.add_tfrs_to_report(df,report,'gavg')
-tlbx.add_tfrs_comparison_to_report(df,report,'gavg')
+tlbx.add_tfrs_comparison_to_report(df,report,'gavg',analysis_type = 'within_group')
+tlbx.add_tfrs_comparison_to_report(df,report,'gavg',analysis_type = 'between_group' )
+    
 tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Diagnosis','Theta-Alpha',(6,12),ci=False)
 tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Condition','Theta-Alpha',(6,12),ci=False)
-tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Diagnosis','Theta',(4,12),ci=False)
-tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Condition','Theta',(4,12),ci=False)
+tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Diagnosis','Theta',(4,8),ci=False)
+tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Condition','Theta',(4,8),ci=False)
 tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Diagnosis','Alpha',(8,12),ci=False)
 tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Condition','Alpha',(8,12),ci=False)
 tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Diagnosis','Beta',(13,30),ci=False)
 tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Condition','Beta',(13,30),ci=False)
+# tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Diagnosis','Gamma',(60,80),ci=False)
+# tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Condition','Gamma',(60,80),ci=False)
+
+tlbx.add_interaction_plot_to_report(df,report,'gavg')
 
 # tlbx.add_fsaverage_to_report(report,df,cfg.labels_of_interest[0] + '_grown')
 

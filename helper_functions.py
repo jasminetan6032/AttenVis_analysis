@@ -18,7 +18,7 @@ from scipy.ndimage import label
 import matplotlib.patches as mpatches
 from statsmodels.stats.multitest import fdrcorrection
 
-import AttenVis_config as cfg
+import AttenVis_connectivity_config as cfg
 
 #plotting parameters
 SMALL_SIZE = 22
@@ -474,7 +474,7 @@ def plot_pac(low_fq_range, high_fq_range, condition, output_dir, data_list, titl
     plt.close(fig)
     return fig, savename
        
-def add_tfrs_to_report(df,report,id):
+def add_tfrs_to_report(df,report,id,hemi_label = None):
     times = df["time"].values[0]
     time_to_plot = [find_nearest(times,cfg.tmin_plot),find_nearest(times,cfg.tmax_plot)]
     time_for_plot = times[time_to_plot[0]:time_to_plot[1]]
@@ -483,14 +483,20 @@ def add_tfrs_to_report(df,report,id):
     for condition in cfg.brain_selected_conditions:
         image_names = []
         for hemi in cfg.hemisphere:
-            df_hemi = df[df["hemisphere"]==hemi]
+            if hemi_label is None:
+                df_hemi = df[df["hemisphere"]==hemi]
+            else:
+                df_hemi = df[df["target_hemi"]==hemi]   
             datasets = []
             for diagnosis in cfg.diagnoses:
                 df_to_plot = df_hemi[(df_hemi['Diagnosis'] == diagnosis) & (df_hemi['Condition']==condition)]
                 if df_to_plot.empty:
                     print(f"No data for {diagnosis} in {condition} for {hemi}. Skipping...")
                     continue
-                avg_data = np.stack(df_to_plot['power'].values).mean(axis=0)
+                if hemi_label is None:
+                    avg_data = np.stack(df_to_plot['power'].values).mean(axis=0)
+                else:
+                    avg_data = np.stack(df_to_plot['connectivity_data'].values).mean(axis=0)
                 sliced_data = avg_data[freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
                 datasets.append(sliced_data)
             titles = [cfg.diagnoses[diag]['label_n'] for diag in cfg.diagnoses]
@@ -510,13 +516,16 @@ def add_tfrs_to_report(df,report,id):
         ax1.axis('off')
         ax2.imshow(plt.imread(image_names[1]))
         ax2.axis('off')
-        title = '_'.join([id,condition,'power'])
-        
+        if hemi_label is None:
+            title = '_'.join([id,condition,'power'])
+        else:
+            title = '_'.join([id,hemi_label,condition,'coh'])
+
         report.add_figure(fig=fig, title=title, section=id, tags=[condition,'power'],replace=True)
         report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
         plt.close('all')
 
-def plot_participant_tfrs(df,id):
+def plot_participant_tfrs(df,id,label_hemi = None):
     pics = []
     time = df['time'].values[0]
     freqs = np.arange(cfg.freq_min,cfg.freq_max+1,1)
@@ -526,20 +535,34 @@ def plot_participant_tfrs(df,id):
     for condition in cfg.condition:
         datasets = []
         for hemi in cfg.hemisphere:
-            df_hemi = df[df["hemisphere"]==hemi]
+            if label_hemi is not None:
+                df_hemi = df[df["target_hemi"]==hemi]
+            else:
+                df_hemi = df[df["hemisphere"]==hemi]
             #plot non-normalised power
             df_to_plot = df_hemi[(df_hemi['Condition']==condition)]
             if df_to_plot.empty:
                 print(f"No data for {condition} in {hemi}. Skipping...")
                 continue
-            avg_data = np.stack(df_to_plot['power'].values).mean(axis=0)
+            if label_hemi is None:
+                avg_data = np.stack(df_to_plot['power'].values).mean(axis=0)
+            else:
+                avg_data = np.stack(df_to_plot['connectivity_data'].values).mean(axis=0)
             sliced_data = avg_data[freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
             datasets.append(sliced_data)
-        titles = ['Left Hemisphere', 'Right Hemisphere']
+        if label_hemi is None:
+            titles = ['Left Hemisphere', 'Right Hemisphere']
+        else:
+            titles = [f'{label_hemi.upper()} Label to Left Hemisphere', f'{label_hemi.upper()} Label to Right Hemisphere']
 
         fig1, name = plot_time_frequency(time_for_plot,freqs[freq_to_plot[0]:freq_to_plot[1]],condition,cfg.output_dir,datasets,titles,add_vlines= cfg.vlines)
-        title = '_'.join([id,condition,'power'])
-        pics.append([fig1,title,condition])
+        if label_hemi is None:
+            title = '_'.join([id,condition,'power'])
+            pics.append([fig1,title,condition])
+
+        else:
+            title = '_'.join([id,label_hemi,condition,'coh'])
+            pics.append([fig1,title,condition,label_hemi])
     return pics
 
 
@@ -650,8 +673,6 @@ def add_fsaverage_to_report(report,df,label_name,seed_hemi=None):
     report.add_figure(fig=fig, title=savetitle, section='gavg', tags=label_name,replace=True)
     report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
 
-
-
 def plot_stc(id,stc,hemi,initial_time,annot_label,condition,label_color,other_hemi=None):
     brain = stc.plot(
     subjects_dir='/autofs/space/transcend/MRI/WMA/recons/',
@@ -708,7 +729,7 @@ def plot_line(df,variable,ax,label,color,freqs = None,ci=False,group=False):
 
     return ax
 
-def compute_sig_mask(df, factor_name, variable='stc', alpha=0.05, paired=False,freqs = None,fdr = True):
+def compute_sig_mask(df, factor_name, variable='stc', alpha=0.05, paired=False,freqs = None,fdr = False):
     """
     Computes a significance mask across time points between levels of a categorical variable.
 
@@ -999,11 +1020,11 @@ def get_coh_stc(df,plot_type):
     return coh_stc, con_subjID_date
         
 
-def plot_coh_conditions(ax,df,tag,factor,factor_name_in_df,ylims,ci=False,group=False,plot_title=None,highlight_area=False,area_time_window=None,zcoh=False):
+def plot_coh_conditions(ax,df,tag,factor,factor_name_in_df,ylims,freqs = None,ci=False,group=False,plot_title=None,highlight_area=False,area_time_window=None,zcoh=False):
 
     for level in factor:       
         df_to_plot = df[(df[factor_name_in_df]==level)]
-        ax = plot_line(df_to_plot,'stc',ax,cfg.plot_labels[level]['label'],cfg.color_dict[level],ci=ci,group=group)
+        ax = plot_line(df_to_plot,'connectivity_data',ax,cfg.plot_labels[level]['label'],cfg.color_dict[level],ci=ci,group=group,freqs = freqs)
     ax.legend(fontsize = 16)
     ax.set_ylim(ylims)
     ax.set_xlim(left=0)
@@ -1079,34 +1100,69 @@ def add_gavg_power_over_time_to_report(df,report,id,factor_name_in_df,freq_label
 
         plt.close('all')
 
-def add_participant_coh_to_report(df,report,id):
-    diagnosis = df["Diagnosis"].values[0]
+def plot_participant_coh_line(df, freqs, skip_brain_images=False):
+    """
+    Create coherence plots for one participant.
+
+    Parameters:
+    - df: DataFrame containing participant data
+    - skip_brain_images: If True, don't load or show brain images (ax1, ax2)
+
+    Returns:
+    - fig: Matplotlib figure object
+    """
+    pics = []
     for hemi in cfg.hemisphere:
-        hemi_tag = ' (' + hemi.upper() + ')'
-        #plot time series activations   
-        fig = plt.figure(figsize=(18,6), layout='constrained')
-        gs  = GridSpec(1, 4, figure=fig) 
-        ax1 = fig.add_subplot(gs[0,0])
-        ax2 = fig.add_subplot(gs[0,1])
-        ax3 = fig.add_subplot(gs[0,2])
-        ax4 = fig.add_subplot(gs[0,3])
-        brain1_image_name = os.path.join(cfg.output_dir,'_'.join([cfg.selected_conditions[0],hemi,hemi, "brain.tiff"]))
-        ax1.imshow(plt.imread(brain1_image_name))
-        ax1.axis('off')
-        other_hemi = [x for x in cfg.hemisphere if x not in hemi][0]
-        other_hemi_tag = ' (' + other_hemi.upper() + ')'
-        brain2_image_name = os.path.join(cfg.output_dir,'_'.join([cfg.selected_conditions[0],other_hemi, hemi, "brain.tiff"]))
-        ax2.imshow(plt.imread(brain2_image_name))
-        ax2.axis('off')
-        df_to_plot = df[(df["hemisphere"]==hemi) & (df["target_hemi"]==hemi)]
-        ax3 = plot_coh_conditions(ax3,df_to_plot,df['Participant'].values[0] + hemi_tag + ' to ' + hemi_tag,cfg.selected_conditions,'Condition', cfg.ylims, group=False,plot_title='Coherence from ')
-        df_to_plot = df[(df["hemisphere"]==hemi) & (df["target_hemi"]==other_hemi)]
-        ax4 = plot_coh_conditions(ax4,df_to_plot,df['Participant'].values[0] + hemi_tag+ ' to' + other_hemi_tag,cfg.selected_conditions,'Condition', cfg.ylims, group=False,plot_title='Coherence from ')
-        title = '_'.join([id,hemi,'coherence'])
-        report.add_figure(fig=fig, title=title, section=id, tags=[hemi,'coherence',diagnosis],replace=True)
-        plt.close('all')
-    
-def add_gavg_coh_to_report(df,report,id,factor_name_in_df,zcoh=False,ci=False):
+        hemi_tag = f' ({hemi.upper()})'
+        other_hemi = [x for x in cfg.hemisphere if x != hemi][0]
+        other_hemi_tag = f' ({other_hemi.upper()})'
+
+        fig = plt.figure(figsize=(18, 6), layout='constrained')
+        gs = GridSpec(1, 4, figure=fig)
+
+        # Set up axes
+        if skip_brain_images:
+            ax1, ax2 = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1])
+            ax1.axis('off')
+            ax2.axis('off')
+        else:
+            # Load and display brain images
+            ax1 = fig.add_subplot(gs[0, 0])
+            brain1_image = os.path.join(cfg.output_dir, '_'.join([cfg.selected_conditions[0], hemi, hemi, "brain.tiff"]))
+            if os.path.exists(brain1_image):
+                ax1.imshow(plt.imread(brain1_image))
+            ax1.axis('off')
+
+            ax2 = fig.add_subplot(gs[0, 1])
+            brain2_image = os.path.join(cfg.output_dir, '_'.join([cfg.selected_conditions[0], other_hemi, hemi, "brain.tiff"]))
+            if os.path.exists(brain2_image):
+                ax2.imshow(plt.imread(brain2_image))
+            ax2.axis('off')
+
+        # Plot coherence same-hemisphere
+        ax3 = fig.add_subplot(gs[0, 2])
+        df_to_plot = df[(df["hemisphere"] == hemi) & (df["target_hemi"] == hemi)]
+        ax3 = plot_coh_conditions(
+            ax3, df_to_plot,
+            df['Participant'].values[0] + hemi_tag + ' to ' + hemi_tag,
+            cfg.selected_conditions, 'Condition', cfg.ylims,freqs=freqs,highlight_area=True,area_time_window=(0.8,1.15),
+            group=False, plot_title='Coherence from '
+        )
+
+        # Plot coherence cross-hemisphere
+        ax4 = fig.add_subplot(gs[0, 3])
+        df_to_plot = df[(df["hemisphere"] == hemi) & (df["target_hemi"] == other_hemi)]
+        ax4 = plot_coh_conditions(
+            ax4, df_to_plot,
+            df['Participant'].values[0] + hemi_tag + ' to ' + other_hemi_tag,
+            cfg.selected_conditions, 'Condition', cfg.ylims,freqs=freqs,highlight_area=True,area_time_window=(0.8,1.15),
+            group=False, plot_title='Coherence from '
+        )
+        title = '_'.join([hemi,'coherence'])
+        pics.append([fig, title])
+    return pics # ✅ Now returns the figure instead of adding it to the report
+
+def add_gavg_coh_to_report(df,report,id,factor_name_in_df,freqs = None,zcoh=False,ci=False):
     if zcoh:
         plot_title = 'Normalised coherence from '
         ylims = cfg.zcoh_ylims
@@ -1134,9 +1190,11 @@ def add_gavg_coh_to_report(df,report,id,factor_name_in_df,zcoh=False,ci=False):
                 target_hemi_tag = ' (' + target_hemi.upper() + ')'
                 df_to_plot = df[(df[factor_name_in_df] == factor_level) & (df['hemisphere'] == hemi) & (df['target_hemi'] == target_hemi)]
                 if factor_name_in_df == 'Condition':
-                    plot_coh_conditions(hemi_axes[hemi][target_hemi],df_to_plot,factor_level + hemi_tag + ' to' + target_hemi_tag,cfg.diagnoses,'Diagnosis',ylims,group=True,plot_title=plot_title,ci=ci)
+                    plot_coh_conditions(hemi_axes[hemi][target_hemi],df_to_plot,factor_level + hemi_tag + ' to' + target_hemi_tag,
+                                        cfg.diagnoses,'Diagnosis',ylims,group=True,plot_title=plot_title,freqs=freqs,ci=ci)
                 elif factor_name_in_df == 'Diagnosis':
-                    plot_coh_conditions(hemi_axes[hemi][target_hemi],df_to_plot,factor_level + hemi_tag + ' to' + target_hemi_tag,cfg.selected_conditions,'Condition',ylims,group=True,plot_title=plot_title, ci=ci)
+                    plot_coh_conditions(hemi_axes[hemi][target_hemi],df_to_plot,factor_level + hemi_tag + ' to' + target_hemi_tag,
+                                        cfg.selected_conditions,'Condition',ylims,group=True,plot_title=plot_title, freqs=freqs,ci=ci)
 
         title = '_'.join([id,factor_level,report_tag])
 
@@ -1425,8 +1483,8 @@ def plot_RT(data, group = False):
             n_boot=1000,       # Number of bootstrap samples (adjust as needed)
             ax=ax              # Use figure handle
         )
-    ax.set_title('Median Reaction Time by Difficulty and Condition')
-    ax.set_ylabel('Median RT (ms)')
+    ax.set_title('Mean Reaction Time by Difficulty and Condition')
+    ax.set_ylabel('Mean RT (ms)')
     ax.set_xlabel('Difficulty')
     # Move legend outside
     ax.legend(
@@ -1439,8 +1497,31 @@ def plot_RT(data, group = False):
     return fig
 
 def add_table_to_report(df,report,id):
-    text_block = df.to_html()
-    report.add_html(text_block, title='RT Summary Table', section=id, tags=['RT_summary_table'], replace=True)
+    style = """
+            <style>
+            .compact-table {
+                table-layout: fixed;
+                width: auto;
+                font-size: 12px;
+                border-collapse: collapse;
+                margin: auto;
+            }
+            .compact-table th, .compact-table td {
+                padding: 4px 6px;
+                text-align: left;
+                white-space: nowrap;
+            }
+            .compact-table th {
+                background-color: #f2f2f2;
+            }
+            .compact-table tr:nth-child(even) {
+                background-color: #fafafa;
+            }
+            </style>
+            """
+    text_block = df.to_html(classes='compact-table', border=0)
+    html_block = style + text_block
+    report.add_html(html_block, title='RT Summary Table', section=id, tags=['RT_summary_table'], replace=True)
 
 def find_response_triggers(events):
     events_data = pd.DataFrame(events)
@@ -1585,12 +1666,19 @@ def draw_label_from_epochs(visit_dir,subjID_date,epochs,inverse_operator,label_t
             annot_label = load_annot_labels(cfg.labels_list,subjID_date,parc,hemi,cfg.subj_dir)
         stc_from_annot_label = stc.in_label(annot_label)
         grown_label,morphed_label,label_fname,peak_time = find_peak_grow_label(stc_from_annot_label,hemi,cfg.peak_time_window[0],cfg.peak_time_window[1],5,subjID_date,'pow',visit_dir)
-        peak_info[hemi] = {
+        if label_to_draw_from == 'fs_drawn':
+            peak_info[hemi] = {
             "label": grown_label,
             "morphed_label": morphed_label,
             "time": peak_time,
             "label_picture": fig
-        }
+            }
+        elif label_to_draw_from == 'annot':
+            peak_info[hemi] = {
+                "label": grown_label,
+                "morphed_label": morphed_label,
+                "time": peak_time
+            }
     return peak_info
 
 def draw_label_from_stc(visit_dir,subjID_date,stc,label_to_draw_from = 'fs_drawn',mode = 'abs'):
@@ -1656,8 +1744,8 @@ def generate_report(inv = False):
 
 def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
                         grouping_label, output_dir, alpha=0.05, paired=True,
-                        cmap='RdBu_r', vmin=None, vmax=None,
-                        return_masks=False,data_type = 'tf',add_vlines = False):
+                        cmap='RdBu_r', vmin=None, vmax=None,sig_mask = True,
+                        return_masks=False,data_type = 'tf',add_vlines = False,analysis_type=False):
     """
     Compare TF plots between two conditions and draw contours around significant differences.
 
@@ -1713,14 +1801,22 @@ def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
     x_lims = [cfg.tmin_plot, cfg.tmax_plot]
     for i, (data1, data2) in enumerate(data_by_hemi):
         # assert data1.shape == data2.shape, f"Shape mismatch in panel {i}"
-
-        if paired:
-            t_vals, p_vals = ttest_rel(data1, data2, axis=0)
-            diff = np.mean(data1 - data2, axis=0)
+            # Determine whether to compute, use provided, or skip
+        if isinstance(sig_mask, bool):
+            if sig_mask:  # sig_mask == True → compute inside
+                if paired:
+                    t_vals, p_vals = ttest_rel(data1, data2, axis=0)
+                    diff = np.mean(data1 - data2, axis=0)
+                else:
+                    t_vals, p_vals = ttest_ind(data1, data2, axis=0)
+                    diff = np.mean(data1,axis=0) - np.mean(data2, axis=0)
+                computed_sig_mask = p_vals < alpha
+            else:  # sig_mask == False → don't plot
+                computed_sig_mask = None
+        elif isinstance(sig_mask, np.ndarray):
+            computed_sig_mask = sig_mask
         else:
-            t_vals, p_vals = ttest_ind(data1, data2, axis=0)
-            diff = np.mean(data1,axis=0) - np.mean(data2, axis=0)
-        sig_mask = p_vals < alpha
+            raise ValueError("sig_mask must be True, False, or an array of the same shape as the data")
 
         if data_type == 'pac':
             diff_to_plot = diff.T
@@ -1757,16 +1853,21 @@ def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
         else:
             ax[i].set_yticklabels('')
 
-        # Draw significance contours
-        labeled, n_clusters = label(sig_mask_to_plot)
-        for c in range(1, n_clusters + 1):
-            cluster = labeled == c
-            ax[i].contour(x_axis, y_axis, cluster, colors='k', linewidths=1.5)
+        if computed_sig_mask is not None:
+            # Draw significance contours
+            labeled, n_clusters = label(computed_sig_mask)
+            for c in range(1, n_clusters + 1):
+                cluster = labeled == c
+                ax[i].contour(x_axis, y_axis, cluster, colors='k', linewidths=1.5)
 
     # Shared colorbar
     cbar = fig.colorbar(cf, ax=ax, label='Mean Difference', orientation='vertical', ticks=np.linspace(vmin, vmax, cfg.crossfreq_plot_lims[2]))
 
     # Set figure title
+    if analysis_type == 'interaction':
+        full_title = f"Interaction: (ASD {list(cfg.condition.keys())[0]}−{list(cfg.condition.keys())[1]}) − (TD {list(cfg.condition.keys())[0]}−{list(cfg.condition.keys())[1]})"
+
+        cbar.set_label(f'Interaction: (ASD Δ - TD Δ) [{list(cfg.condition.keys())[0]}−{list(cfg.condition.keys())[1]}]')
     if paired:
         full_title = "Comparing " + '-'.join([key.capitalize() for key in cfg.condition.keys()]) + f" ({grouping_label.upper()})"
     else:
@@ -1858,44 +1959,79 @@ def add_pacs_comparison_to_report(df,report,id, analysis_type='within_group'):
     report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
     plt.close('all')
 
-def add_tfrs_comparison_to_report(df,report,id,data_type = 'tf'):
+def add_tfrs_comparison_to_report(df,report,id,analysis_type='within_group',hemi_label=None):
     time = df['time'].values[0]
     time_to_plot = [find_nearest(time,cfg.tmin_plot),find_nearest(time,cfg.tmax_plot)]
     time_for_plot = time[time_to_plot[0]:time_to_plot[1]]
     freqs = np.arange(cfg.freq_min,cfg.freq_max+1,1)
     freq_to_plot = [np.where(freqs==cfg.freq_min_plot)[0][0],np.where(freqs==cfg.freq_max_plot)[0][0]]
     image_names = []
-    for diagnosis in cfg.diagnoses:
-        df_diagnosis = df[df["Diagnosis"]==diagnosis]
-        datasets = []
-        for hemi in cfg.hemisphere:
-            hemi_dataset = []
-            for condition in cfg.condition:
-                df_to_plot = df_diagnosis[(df_diagnosis["hemisphere"]==hemi) & (df_diagnosis['Condition']==condition)]
-                if df_to_plot.empty:
-                    print(f"No data for {diagnosis} in {condition} for {hemi}. Skipping...")
-                    continue
-                if data_type == 'pac':
-                    data = np.stack(df_to_plot['pac'].values)
-                else:
+    if analysis_type == 'within_group':
+        for diagnosis in cfg.diagnoses:
+            datasets = []
+            for hemi in cfg.hemisphere:
+                hemi_dataset = []
+                for condition in cfg.condition:
+                    if hemi_label is None:
+                        df_to_plot = df[(df["hemisphere"]==hemi) & (df['Condition']==condition) & (df['Diagnosis']==diagnosis)]
+                    else:
+                        df_to_plot = df[(df["target_hemi"]==hemi) & (df['Condition']==condition) & (df['Diagnosis']==diagnosis)]
+                    if df_to_plot.empty:
+                        print(f"No data for {diagnosis} in {condition} for {hemi}. Skipping...")
+                        continue
                     all_data = np.stack(df_to_plot['power'].values)
                     data = all_data[:,freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
-                hemi_dataset.append(data)
-            datasets.append(hemi_dataset)
-        titles = ['Left Hemisphere', 'Right Hemisphere']
+                    hemi_dataset.append(data)
+                datasets.append(hemi_dataset)
+            if hemi_label is None:
+                titles = ['Left Hemisphere', 'Right Hemisphere']
+            else:
+                titles = [f'{hemi_label.upper()} Label to Left Hemisphere', f'{hemi_label.upper()} Label to Right Hemisphere']
 
-        fig1, name = plot_tf_comparison(
-                    datasets, time_for_plot, freqs[freq_to_plot[0]:freq_to_plot[1]], titles,
-                    diagnosis, cfg.output_dir, alpha=0.05, paired=True,
-                    cmap='RdBu_r', vmin=None, vmax=None,data_type=data_type,
-                    return_masks=False,add_vlines=True)
-        title = '_'.join([id,condition,'pac'])
-        #save fig
-        fig_to_save = fig1.get_figure()
-        fig_to_save.savefig(name.replace('.tiff','.svg'),format="svg")
-        fig_to_save.savefig(name,dpi=300)
-        image_names.append(name)
-        plt.close()
+            fig1, name = plot_tf_comparison(
+                        datasets, time_for_plot, freqs[freq_to_plot[0]:freq_to_plot[1]], titles,
+                        diagnosis, cfg.output_dir, alpha=0.05, paired=True,
+                        cmap='RdBu_r', vmin=None, vmax=None,data_type='tf',
+                        return_masks=False,add_vlines=True)
+            #save fig
+            fig_to_save = fig1.get_figure()
+            fig_to_save.savefig(name.replace('.tiff','.svg'),format="svg")
+            fig_to_save.savefig(name,dpi=300)
+            image_names.append(name)
+            plt.close()
+    elif analysis_type == 'between_group':
+        for condition in cfg.condition:
+            datasets = []
+            for hemi in cfg.hemisphere:
+                hemi_dataset = []
+                for diagnosis in cfg.diagnoses:
+                    if hemi_label is None:
+                        df_to_plot = df[(df["hemisphere"]==hemi) & (df['Condition']==condition) & (df['Diagnosis']==diagnosis)]
+                    else:
+                        df_to_plot = df[(df["target_hemi"]==hemi) & (df['Condition']==condition) & (df['Diagnosis']==diagnosis)]
+                    if df_to_plot.empty:
+                        print(f"No data for {diagnosis} in {condition} for {hemi}. Skipping...")
+                        continue
+                    all_data = np.stack(df_to_plot['power'].values)
+                    data = all_data[:,freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
+                    hemi_dataset.append(data)
+                datasets.append(hemi_dataset)
+            if hemi_label is None:  
+                titles = ['Left Hemisphere', 'Right Hemisphere']
+            else:
+                titles = [f'{hemi_label.upper()} Label to Left Hemisphere', f'{hemi_label.upper()} Label to Right Hemisphere']
+
+            fig1, name = plot_tf_comparison(
+                        datasets, time_for_plot, freqs[freq_to_plot[0]:freq_to_plot[1]], titles,
+                        condition, cfg.output_dir, alpha=0.05, paired=False,
+                        cmap='RdBu_r', vmin=None, vmax=None,data_type='tf',
+                        return_masks=False,add_vlines=True)
+            #save fig
+            fig_to_save = fig1.get_figure()
+            fig_to_save.savefig(name.replace('.tiff','.svg'),format="svg")
+            fig_to_save.savefig(name,dpi=300)
+            image_names.append(name)
+            plt.close()
     fig = plt.figure(figsize=(18,6), layout='constrained')
     gs  = GridSpec(1, 2, figure=fig) 
     ax1 = fig.add_subplot(gs[0,0])
@@ -1904,7 +2040,97 @@ def add_tfrs_comparison_to_report(df,report,id,data_type = 'tf'):
     ax1.axis('off')
     ax2.imshow(plt.imread(image_names[1]))
     ax2.axis('off')
-    title = '_'.join([id,'tfr_comparison'])
+    title = '_'.join([id,analysis_type,hemi_label,'tfr_comparison'])
     report.add_figure(fig=fig, title=title, section=id, tags=['tfr'],replace=True)
     report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
     plt.close('all')
+
+def plot_interaction_tfr(data, times, freqs):
+    """
+    Plot the interaction TFR: (ASD_cond1 - ASD_cond2) - (TD_cond1 - TD_cond2)
+
+    Parameters:
+    - asd_cond1, asd_cond2, td_cond1, td_cond2: np.ndarray, shape (n_subjects, n_freqs, n_times)
+    - times: 1D array of time points
+    - freqs: 1D array of frequency points
+    - sig_mask: np.ndarray of shape (n_freqs, n_times), bool, optional significance mask
+    - vlim: 'auto' or float — for symmetric color scale
+    - cmap: colormap
+    - title: plot title
+    - figsize: figure size
+
+    Returns:
+    - fig: the matplotlib Figure object
+    """
+    data_by_hemi = []
+    for hemi_data in data:
+        asd_data_condlist = hemi_data[0]
+        td_data_condlist = hemi_data[1]
+
+        asd_cond1, asd_cond2 = asd_data_condlist
+        td_cond1, td_cond2 = td_data_condlist
+
+        asd_diff = asd_cond1 - asd_cond2
+        td_diff = td_cond1 - td_cond2
+        data_by_hemi.append([asd_diff, td_diff])
+
+    titles = ['Left Hemisphere', 'Right Hemisphere']
+
+    fig, name = plot_tf_comparison(
+                data_by_hemi, times, freqs, titles,
+                'interaction', cfg.output_dir, alpha=0.05, paired=False,
+                cmap='RdBu_r', vmin=None, vmax=None,data_type='tf',sig_mask=False,
+                return_masks=False,add_vlines=True)
+
+    return fig
+
+def add_interaction_plot_to_report(df,report,id):
+    time = df['time'].values[0]
+    time_to_plot = [find_nearest(time,cfg.tmin_plot),find_nearest(time,cfg.tmax_plot)]
+    time_for_plot = time[time_to_plot[0]:time_to_plot[1]]
+    freqs = np.arange(cfg.freq_min,cfg.freq_max+1,1)
+    freq_to_plot = [np.where(freqs==cfg.freq_min_plot)[0][0],np.where(freqs==cfg.freq_max_plot)[0][0]]
+    image_names = []
+    if cfg.analysis_type == 'power':
+        variable = 'power'
+    elif cfg.analysis_type == 'cross_freq':
+        variable = 'pac'
+    data_by_hemi = []
+    for hemi in cfg.hemisphere:
+        # Prepare data for each diagnosis and condition
+        diagnosis_list = {}
+        for diagnosis in cfg.diagnoses:
+            cond_list = []
+            for condition in cfg.condition:
+                diagnosis_df = df[(df["hemisphere"] == hemi) & (df['Condition'] == condition) & (df['Diagnosis'] == diagnosis)]
+                # Extract and slice data
+                if cfg.analysis_type == 'power':
+                    diagnosis_data = np.stack(diagnosis_df[variable].values)[:, freq_to_plot[0]:freq_to_plot[1], time_to_plot[0]:time_to_plot[1]]
+                else:
+                    diagnosis_data = np.stack(diagnosis_df[variable].values)
+                cond_list.append(diagnosis_data)
+            diagnosis_list.append(cond_list)
+        data_by_hemi.append(diagnosis_list)
+        # Compute interaction plot
+        fig = plot_interaction_tfr(
+            data_by_hemi, list(cfg.condition),
+            time_for_plot, 
+            freqs[freq_to_plot[0]:freq_to_plot[1]],
+            title=f'Group × Condition Interaction TFR ({hemi.upper()})'
+        )
+        savename = os.path.join(cfg.output_dir, f"{id}_{hemi}_interaction_tfr.tiff")
+        fig.savefig(savename, dpi=300)
+        image_names.append(savename)
+        plt.close(fig)
+    # Create a figure to display both hemispheres
+    fig = plt.figure(figsize=(18,6), layout='constrained')
+    gs  = GridSpec(1, 2, figure=fig) 
+    ax1 = fig.add_subplot(gs[0,0])
+    ax2 = fig.add_subplot(gs[0,1])
+    ax1.imshow(plt.imread(image_names[0]))
+    ax1.axis('off')
+    ax2.imshow(plt.imread(image_names[1]))
+    ax2.axis('off')
+    title = '_'.join([id,cfg.analysis_type,'interaction_tfr_comparison'])
+    report.add_figure(fig=fig, title=title, section=id, tags=['interaction', 'tfr'], replace=True)
+    report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)

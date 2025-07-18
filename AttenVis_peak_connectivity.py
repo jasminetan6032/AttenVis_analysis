@@ -14,19 +14,12 @@ report = tlbx.generate_report()
 for sub_id in participants_to_study:
 
     participant_data = []
-    visit_dir        = participants_df[participants_df['Participant'] == sub_id]['Visit_Dir'].values[0]
+    diagnosis, study,visit_dir,subjID_date = tlbx.read_participant_details_from_dataframe(participants_df,sub_id)
     participant_data_savename = os.path.join(visit_dir,cfg.data_fname.replace('.pkl','_' + sub_id + '.pkl'))
     df_participant = pd.read_pickle(participant_data_savename)
 
-    diagnosis   = participants_df[participants_df['Participant'] == sub_id]['Diagnosis'].values[0]
-    study       = participants_df[participants_df['Participant'] == sub_id]['Study'].values[0]
-    subjID_date = participants_df[participants_df['Participant'] == sub_id]['SubjID_Date'].values[0]
-
     coh_stc,con_subjID_date = tlbx.get_coh_stc(df_res,'time')
-    coh_peak_label,morphed_coh_peak_label,coh_peak_label_fname, peak_time = tlbx.find_peak_grow_label(coh_stc,target_hemi,0,0.5,5,con_subjID_date,'coh',visit_dir)
-    cfg.peak_labels_hemis[hemi].update({target_hemi:coh_peak_label})
-    cfg.peak_morphed_labels_hemis[hemi].update({target_hemi:morphed_coh_peak_label})
-    cfg.peak_times_hemis[hemi].update({target_hemi:peak_time})
+    peak_info = tlbx.draw_label_from_stc(coh_stc,target_hemi,0,0.5,5,con_subjID_date,'coh',visit_dir)
     
     for condition in cfg.condition:
         for difficulty_level in cfg.difficulty:
@@ -34,9 +27,9 @@ for sub_id in participants_to_study:
                 df_res = df_participant[(df_participant["Condition"]==condition) & (df_participant['hemisphere']== hemi) & (df_participant['Difficulty']==difficulty_level)]
                 n_epochs = df_res['n_epochs'].values[0]
                 for target_hemi in cfg.hemisphere:
-                    coh_peak_label = cfg.peak_labels_hemis[hemi][target_hemi] 
-                    peak_time = cfg.peak_times_hemis[hemi][target_hemi]
-                    morphed_coh_peak_label= cfg.peak_morphed_labels_hemis[hemi][target_hemi]
+                    coh_peak_label = peak_info[hemi][target_hemi] 
+                    peak_time = peak_info[hemi][target_hemi]
+                    morphed_coh_peak_label= peak_info[hemi][target_hemi]
                     coh_stc_label = np.mean(coh_stc.in_label(coh_peak_label).data,axis=0)
                     brain_image_name = tlbx.plot_stc(coh_stc,target_hemi,peak_time,coh_peak_label,condition,'blue',other_hemi = hemi)
                     data = [sub_id,subjID_date,diagnosis,condition,hemi,target_hemi,coh_stc_label,morphed_coh_peak_label,df_res['time'].values[0],n_epochs]

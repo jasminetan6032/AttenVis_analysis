@@ -2,7 +2,7 @@ import os
 
 local_dir = '/autofs/space/hypatia_002/users/Jasmine/'
 paradigm = 'AttenVis'
-analysis_type = 'cross_freq' 
+analysis_type = 'power' 
 if paradigm == 'Misophonia_ASD_TD':
     data_dir = os.path.join(local_dir, 'Misophonia',paradigm)
 else:
@@ -37,7 +37,7 @@ epochs_to_use_dict = {'stimuli': '_nobaseline_nofilter_all_conditions_metadata_e
                  'response': '_nobaseline_nofilter_all_conditions_metadata_response_epo.fif'} #-1.5 to 0.5s
 epochs_to_use = epochs_to_use_dict[stimuli_or_response]
 
-time_windows = [0.8, 1.15]#[-1.5,0.5]  # [0.9,1.2]
+time_windows = [-0.5, 2.5]#[-1.5,0.5]  # [0.9,1.2]
 prestimulus_baseline = (-0.2, 0.0)
 
 peak_time_window = [0.9,1.2]
@@ -59,7 +59,7 @@ else:
     freq_min      = 4
     freq_max      = 40                 
 
-con_method    = "MNE"
+con_method    = "dSPM"
 pac_method    = 'penny' #  'ozkurt'
 fc_method     = 'coh'
 fc_mode       = 'cwt_morlet'
@@ -74,8 +74,8 @@ tmin_plot               =  -0.3 #-1.5 #-0.3
 tmax_plot               =  1.5 #0.5 #1.5
 freq_min_plot           = 4 #4
 freq_max_plot           = 40
-power_line_plot_ylims   = (-0.2,0.2)
-power_plot_lims         = [-0.05,0.05,80,5] #min, max, division,division for colorbar
+power_line_plot_ylims   = (-0.05,0.05)
+power_plot_lims         = [-0.05,0.05,40,5] #min, max, division,division for colorbar
 crossfreq_plot_lims     = [0,0.15,15,7] #min, max, division,division for colorbar
 vlines                  = [0.0,0.8]
 alpha = 0.05

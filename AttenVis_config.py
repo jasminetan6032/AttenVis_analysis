@@ -27,8 +27,8 @@ sensor_hemis = ['left','right']
 hemisphere = ['lh','rh']
 
 #what you're investigating: label, view of label and whether to use stimuli-locked or response-locked epochs
-labels_of_interest = ['central']
-brain_view = 'lat'
+labels_of_interest = ['V1']
+brain_view = 'med'
 stimuli_or_response = 'stimuli'
 epochs_to_use_dict = {'stimuli': '_nobaseline_nofilter_all_conditions_metadata_epo.fif',
                  'response': '_nobaseline_nofilter_all_conditions_metadata_response_epo.fif'}
@@ -141,9 +141,8 @@ con_report_savename_html = os.path.join(output_dir,connectivity_save_fname+".htm
 con_report_savename_hdf5 = os.path.join(output_dir,connectivity_save_fname+".hdf5")
 
 inv_report_savename_hdf5 = os.path.join(data_dir,'_'.join([str(prestimulus_baseline[0]),str(prestimulus_baseline[1]),"prestim_inverses.hdf5"]))
-rt_report_savename_hdf5 = os.path.join(data_dir,"RTs_clean_correct_answers.hdf5")
-rt_data_savename = os.path.join(data_dir,"RTs_clean_correct_answers.pkl")
-
+rt_report_savename_hdf5 = os.path.join(data_dir,"RTs_unfiltered.hdf5")
+rt_data_savename = os.path.join(data_dir,"RTs_unfiltered.pkl")
 
 inv_report_title = 'AttenVis Prestimulus Inverses ' +  '-'.join([stimuli_or_response,'locked'])
 report_title = '_'.join(list(condition.keys()) + labels_of_interest + [con_method])

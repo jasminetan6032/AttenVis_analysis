@@ -1,8 +1,6 @@
 import os
-import pandas as pd
-import matplotlib as plt
 
-local_dir = '/local_mount/space/hypatia/2/users/Jasmine/'
+local_dir = '/autofs/space/hypatia_002/users/Jasmine/'
 paradigm = 'AttenVis'
 analysis_type = 'connectivity' 
 if paradigm == 'Misophonia_ASD_TD':
@@ -36,7 +34,7 @@ epochs_to_use_dict = {'stimuli': '_nobaseline_nofilter_all_conditions_metadata_e
                  'response': '_nobaseline_nofilter_all_conditions_metadata_response_epo.fif'}
 epochs_to_use = epochs_to_use_dict[stimuli_or_response]
 
-time_windows = [0.9,1.2]  #[-0.5,2.5]
+time_windows = [0,2.5]  #[-0.5,2.5]
 prestimulus_baseline = (-0.2, 0.0)
 
 peak_time_window = [0.9,1.2]
@@ -62,17 +60,19 @@ lambda2       = 1.0 / snr**2
 baseline      = (-0.2,0.0)
 
 #plotting settings
-tmin_plot = -0.3
+tmin_plot = 0
 tmax_plot = 1.5
 freq_min_plot = 4
 freq_max_plot = 40
+power_plot_lims         = [-0.3,0.3,40,5] #min, max, division,division for colorbar
 power_line_plot_ylims = (-0.2,0.3)
 vlines = [0.8]
+alpha = 0.05
 vmin = -1.0
 vmax = 1.0
 fontsize = 20
 confidence = 0.95 #ci interval for line plots
-ylims = (0,10)
+ylims = (0,0.5)
 zcoh_ylims = (-2.0,2.0)
 
 labels_dict = {
@@ -100,16 +100,17 @@ labels_dict = {
     'TPJ'       :   ['TPJ'],
     'visual_drawn_label':['vis'],
     'cingulate': ['G_and_S_cingul-Ant','G_and_S_cingul-Mid-Ant','G_and_S_cingul-Mid-Post'],
+    'cingulate_grown':['cingulate']
 }
 
 if 'electrodes' not in labels_of_interest:
     labels_list = labels_dict[labels_of_interest[0]]
 
 #for connectivity studies
-connectivity_labels = ['V1','cingulate']
+connectivity_labels = ['V1','DLPFC']
 seed_label = labels_dict[connectivity_labels[0]]#['auditory_grown']
 target_label = labels_dict[connectivity_labels[1]]
-selected_conditions = ['target','search','pop-out']
+selected_conditions = ['search','pop-out']
 
 #save locations and names
 if analysis_type == 'connectivity':
@@ -145,7 +146,7 @@ inv_report_savename_hdf5 = os.path.join(data_dir,'_'.join([str(prestimulus_basel
 rt_report_savename_hdf5 = os.path.join(data_dir,"RTs_all_answers.hdf5")
 rt_data_savename = os.path.join(data_dir,"RTs_all_answers.pkl")
 
-
+inv_report_title = 'AttenVis Prestimulus Inverses ' +  '-'.join([stimuli_or_response,'locked'])
 report_title = '_'.join(list(condition.keys()) + labels_of_interest + [con_method])
 
 color_dict = {"search":"orchid",
@@ -164,17 +165,17 @@ color_dict = {"search":"orchid",
 
 #recons and fsaverage directories
 subj_dir = '/autofs/space/transcend/MRI/WMA/recons/'
-fsaverageDir = '/local_mount/space/hypatia/2/users/Jasmine/MNE-sample-data/subjects/'
+fsaverageDir = '/autofs/space/hypatia_002/users/Jasmine/MNE-sample-data/subjects/'
 fname_fsaverage_src = os.path.join(fsaverageDir, "fsaverage" , "bem" , "fsaverage-ico-5-src.fif")
 
 transcend_data_dir = '/autofs/space/transcend/MEG/'
 
 #load analysed_participants_demographics file to get relevant info about participants
 participants_csvs = {
-    'AttenVis'  : '/local_mount/space/hypatia/2/users/Jasmine/AttenVis/analysed_participants_demographics.csv',
-    'AttenAud'  : '/local_mount/space/hypatia/2/users/Jasmine/AttenAud/analysed_participants_demographics.csv', 
-    'Misophonia': '/local_mount/space/hypatia/2/users/Jasmine/Misophonia/analysed_participants_demographics.csv',
-    'Misophonia_ASD_TD' :'/local_mount/space/hypatia/2/users/Jasmine/Misophonia/Miso_TD_ASD.csv', 
+    'AttenVis'  : '/autofs/space/hypatia_002/users/Jasmine/AttenVis/analysed_participants_demographics.csv',
+    'AttenAud'  : '/autofs/space/hypatia_002/users/Jasmine/AttenAud/analysed_participants_demographics.csv', 
+    'Misophonia': '/autofs/space/hypatia_002/users/Jasmine/Misophonia/analysed_participants_demographics.csv',
+    'Misophonia_ASD_TD' :'/autofs/space/hypatia_002/users/Jasmine/Misophonia/Miso_TD_ASD.csv', 
 }
 participants_csv = participants_csvs[paradigm]
 

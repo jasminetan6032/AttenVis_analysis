@@ -85,4 +85,7 @@ df = tlbx.collate_participants_data(participants_df,participants_to_study)
 tlbx.add_pacs_to_report(df,report,'gavg')
 tlbx.add_pacs_comparison_to_report(df,report,'gavg',analysis_type = 'within_group')
 tlbx.add_pacs_comparison_to_report(df,report,'gavg',analysis_type = 'between_group')
+
+tlbx.add_interaction_plot_to_report(df,report,'gavg')
+
 tlbx.show_report(cfg.report_savename_hdf5)
