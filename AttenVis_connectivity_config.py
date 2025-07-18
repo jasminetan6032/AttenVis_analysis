@@ -2,7 +2,8 @@ import os
 
 local_dir = '/autofs/space/hypatia_002/users/Jasmine/'
 paradigm = 'AttenVis'
-analysis_type = 'connectivity' 
+analysis_type = 'connectivity'
+data_var = 'connectivity_data' 
 if paradigm == 'Misophonia_ASD_TD':
     data_dir = os.path.join(local_dir, 'Misophonia',paradigm)
 else:
@@ -47,13 +48,19 @@ overwrite_data = True
 overwrite_epochs = False
 redraw_labels = False
 
-#power, source-localisation and connectivity settings                 
-freq_min      = 4
-freq_max      = 40
+#power, source-localisation and connectivity settings
+freq_bands = {
+    'theta': (4, 8),
+    'alpha': (8, 12),
+    'beta': (12, 30),
+    'gamma': (30, 40)}  
+freq_band = 'beta'               
+freq_min      = freq_bands[freq_band][0]
+freq_max      = freq_bands[freq_band][1]
 con_method    = "dSPM"
 fc_method     = 'coh'
 fc_mode       = 'cwt_morlet'
-con_n_cycles  = 3
+con_n_cycles  = 7
 sfreq         = 250
 snr           = 0.3
 lambda2       = 1.0 / snr**2
@@ -62,9 +69,9 @@ baseline      = (-0.2,0.0)
 #plotting settings
 tmin_plot = 0
 tmax_plot = 1.5
-freq_min_plot = 4
-freq_max_plot = 40
-power_plot_lims         = [0,0.25,40,5] #min, max, division,division for colorbar
+freq_min_plot = freq_min
+freq_max_plot = freq_max
+power_plot_lims         = [0,0.15,40,5] #min, max, division,division for colorbar
 power_line_plot_ylims = (-0.2,0.3)
 vlines = [0.8,1.15]
 alpha = 0.05
@@ -72,7 +79,7 @@ vmin = -1.0
 vmax = 1.0
 fontsize = 20
 confidence = 0.95 #ci interval for line plots
-ylims = (0,0.5)
+ylims = (0,0.2)
 zcoh_ylims = (-2.0,2.0)
 
 labels_dict = {
@@ -124,7 +131,7 @@ else:
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
-save_fname = '_'.join([analysis_type] + [stimuli_or_response] + selected_conditions + labels_of_interest + [con_method]+[str(time_windows[0]),str(time_windows[1])]) #
+save_fname = '_'.join([analysis_type] + [freq_band] + [stimuli_or_response] + selected_conditions + labels_of_interest + [con_method]+[str(time_windows[0]),str(time_windows[1])]) #
 data_fname = save_fname + '.pkl'
 data_savename = os.path.join(output_dir,data_fname)
 peak_times_savename = os.path.join(output_dir,save_fname + '_peak_times.pkl')

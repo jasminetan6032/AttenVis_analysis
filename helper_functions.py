@@ -1026,7 +1026,13 @@ def plot_coh_conditions(ax,df,tag,factor,factor_name_in_df,ylims,freqs = None,ci
         df_to_plot = df[(df[factor_name_in_df]==level)]
         ax = plot_line(df_to_plot,'connectivity_data',ax,cfg.plot_labels[level]['label'],cfg.color_dict[level],ci=ci,group=group,freqs = freqs)
     ax.legend(fontsize = 16)
-    ax.set_ylim(ylims)
+    if group:
+        ax.set_ylim(ylims)
+    else:
+        y_vals = np.concatenate(df['connectivity_data'].values)
+        y_min, y_max = y_vals.min(), y_vals.max()
+        margin = 0.05 * (y_max - y_min) if y_max != y_min else 0.1  # avoid 0-range
+        ax.set_ylim([y_min - margin, y_max + margin])
     ax.set_xlim(left=0)
     ax.set_xlabel('Time (s)',fontsize=cfg.fontsize)
     if zcoh:
@@ -1042,6 +1048,9 @@ def plot_coh_conditions(ax,df,tag,factor,factor_name_in_df,ylims,freqs = None,ci
     if plot_title:
         title = plot_title + tag + ' \n '
         ax.set_title(title,fontsize=16)
+    if cfg.vlines is not None:
+        for vline in cfg.vlines:
+            ax.axvline(x=vline, ls='--', color='k')
 
     return ax
 
@@ -1160,6 +1169,7 @@ def plot_participant_coh_line(df, freqs, skip_brain_images=False):
         )
         title = '_'.join([hemi,'coherence'])
         pics.append([fig, title])
+        plt.close(fig)  # Close the figure to free memory
     return pics # ✅ Now returns the figure instead of adding it to the report
 
 def add_gavg_coh_to_report(df,report,id,factor_name_in_df,freqs = None,zcoh=False,ci=False):
@@ -1744,7 +1754,7 @@ def generate_report(inv = False):
 
 def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
                         grouping_label, output_dir, alpha=0.05, paired=True,
-                        cmap='plasma', vmin=0, vmax=0.75,sig_mask = True, fdr = False, #'RdBu_r'
+                        cmap= 'RdBu_r', vmin=None, vmax=None,sig_mask = True, fdr = False, #'plasma'
                         return_masks=False,data_type = 'tf',add_vlines = False,analysis_type=False):
     """
     Compare TF plots between two conditions and draw contours around significant differences.
@@ -1789,7 +1799,7 @@ def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
     plt.rc('font', size=SMALL_SIZE)
     plt.rc('axes', titlesize=SMALL_SIZE)
     plt.rcParams['figure.constrained_layout.use'] = True
-    levels = np.linspace(0,1,100) #(cfg.power_plot_lims[0], cfg.power_plot_lims[1], cfg.power_plot_lims[2])
+    levels = np.linspace(cfg.power_plot_lims[0], cfg.power_plot_lims[1], cfg.power_plot_lims[2])
 
     n_panels = len(data_by_hemi)
     fig, ax = plt.subplots(1, n_panels, figsize=(6 * n_panels, 5))
@@ -1839,10 +1849,10 @@ def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
             vmax_plot = np.max(np.abs(diff))
             vmin = -vmax_plot
             vmax = vmax_plot
-            levels = np.linspace(vmin, vmax, cfg.crossfreq_plot_lims[2])
+            levels = np.linspace(vmin, vmax, cfg.power_plot_lims[2])
 
 
-        cf = ax[i].contourf(x_axis, y_axis, p_vals_to_plot, levels=levels,
+        cf = ax[i].contourf(x_axis, y_axis, diff_to_plot, levels=levels,
                             cmap=cmap, vmin=vmin, vmax=vmax, extend='both')
         if add_vlines:
             for line in cfg.vlines:
@@ -1867,8 +1877,8 @@ def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
                 ax[i].contour(x_axis, y_axis, cluster, colors='k', linewidths=1.5)
 
     # Shared colorbar
-    cbar = fig.colorbar(cf, ax=ax, label='Mean Difference', orientation='vertical', ticks=[0, 0.05, 0.5, 0.75]) #np.linspace(vmin, vmax, cfg.crossfreq_plot_lims[2])
-    cbar.ax.set_yticklabels(['0', '0.05', '0.5', '0.75'])
+    cbar = fig.colorbar(cf, ax=ax, label='Mean Difference', orientation='vertical', ticks=np.linspace(vmin, vmax, 5))
+    # cbar.ax.set_yticklabels(['0', '0.05', '0.5', '0.75'])
 
     # Set figure title
     if analysis_type == 'interaction':
@@ -1986,7 +1996,7 @@ def add_tfrs_comparison_to_report(df,report,id,analysis_type='within_group',hemi
                     if df_to_plot.empty:
                         print(f"No data for {diagnosis} in {condition} for {hemi}. Skipping...")
                         continue
-                    all_data = np.stack(df_to_plot['power'].values)
+                    all_data = np.stack(df_to_plot[cfg.data_var].values)
                     data = all_data[:,freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
                     hemi_dataset.append(data)
                 datasets.append(hemi_dataset)
@@ -1998,7 +2008,7 @@ def add_tfrs_comparison_to_report(df,report,id,analysis_type='within_group',hemi
             fig1, name = plot_tf_comparison(
                         datasets, time_for_plot, freqs[freq_to_plot[0]:freq_to_plot[1]], titles,
                         diagnosis, cfg.output_dir, alpha=0.05, paired=True,
-                        cmap= 'plasma_r', data_type='tf', #'RdBu_r'
+                        cmap= 'RdBu_r', data_type='tf', #'RdBu_r''plasma_r'
                         return_masks=False,add_vlines=True)
             #save fig
             fig_to_save = fig1.get_figure()
@@ -2019,7 +2029,7 @@ def add_tfrs_comparison_to_report(df,report,id,analysis_type='within_group',hemi
                     if df_to_plot.empty:
                         print(f"No data for {diagnosis} in {condition} for {hemi}. Skipping...")
                         continue
-                    all_data = np.stack(df_to_plot['power'].values)
+                    all_data = np.stack(df_to_plot[cfg.data_var].values)
                     data = all_data[:,freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
                     hemi_dataset.append(data)
                 datasets.append(hemi_dataset)
@@ -2031,7 +2041,7 @@ def add_tfrs_comparison_to_report(df,report,id,analysis_type='within_group',hemi
             fig1, name = plot_tf_comparison(
                         datasets, time_for_plot, freqs[freq_to_plot[0]:freq_to_plot[1]], titles,
                         condition, cfg.output_dir, alpha=0.05, paired=False,
-                        cmap='plasma_r', data_type='tf', #'RdBu_r'
+                        cmap='RdBu_r', data_type='tf', #'RdBu_r''plasma_r'
                         return_masks=False,add_vlines=True)
             #save fig
             fig_to_save = fig1.get_figure()

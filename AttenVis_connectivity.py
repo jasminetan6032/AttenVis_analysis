@@ -51,7 +51,7 @@ def get_connectivity(sub_id,overwrite_data=True):
             # this is some stuff we need to specify how FC is computed by the mne-connectivity toolbox
             indices        = mne_connectivity.seed_target_indices([0], [1])
             cwt_freqs      = np.arange(cfg.freq_min, cfg.freq_max+1, 1)
-            cwt_n_cycles   = 3 #cwt_freqs / 2.0  # number of cycles for the CWT
+            cwt_n_cycles   = cfg.con_n_cycles #cwt_freqs / 2.0  # number of cycles for the CWT
             seed_stcs = []
             target_stcs = []
             for hemi_idx, hemi in enumerate(cfg.hemisphere):
