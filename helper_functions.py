@@ -6,6 +6,7 @@ import pandas as pd
 from matplotlib.gridspec import GridSpec
 import pprint
 import shutil
+import traceback
 import scipy.stats as st
 from collections import Counter
 from autoreject import get_rejection_threshold, AutoReject
@@ -18,7 +19,7 @@ from scipy.ndimage import label
 import matplotlib.patches as mpatches
 from statsmodels.stats.multitest import fdrcorrection
 
-import AttenVis_connectivity_config as cfg
+import AttenVis_power_config as cfg
 
 #plotting parameters
 SMALL_SIZE = 22
@@ -1834,11 +1835,11 @@ def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
 
         if data_type == 'pac':
             diff_to_plot = diff.T
-            sig_mask_to_plot = sig_mask.T
+            sig_mask_to_plot = computed_sig_mask.T
             p_vals_to_plot = p_vals.T
         else:
             diff_to_plot = diff
-            sig_mask_to_plot = sig_mask
+            sig_mask_to_plot = computed_sig_mask
             p_vals_to_plot = p_vals
         if fdr:
             p_vals_to_plot = p_vals_corr.reshape(p_vals.shape)
@@ -1869,9 +1870,9 @@ def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
         else:
             ax[i].set_yticklabels('')
 
-        if computed_sig_mask is not None:
+        if sig_mask_to_plot is not None:
             # Draw significance contours
-            labeled, n_clusters = label(computed_sig_mask)
+            labeled, n_clusters = label(sig_mask_to_plot)
             for c in range(1, n_clusters + 1):
                 cluster = labeled == c
                 ax[i].contour(x_axis, y_axis, cluster, colors='k', linewidths=1.5)
@@ -1900,6 +1901,33 @@ def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
     if return_masks:
         return fig, savename, sig_masks, pval_maps
     return fig, savename
+
+def plot_pval_clusters(p_vals, times, freqs, alpha=0.05, cmap='viridis_r'):
+    """
+    Plot p-values as a time-frequency map, with contours for significant clusters.
+
+    Parameters:
+    - p_vals: 2D array of p-values (freqs x times)
+    - times: 1D array of time points
+    - freqs: 1D array of frequency points
+    - alpha: significance threshold
+    - cmap: colormap where small p-values are prominent (e.g. 'viridis_r')
+    """
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    # Plot p-values
+    im = ax.contourf(times, freqs, p_vals, levels=100, cmap=cmap, vmin=0, vmax=1)
+    cbar = plt.colorbar(im, ax=ax, label='p-value')
+
+    # Contour for significant areas
+    sig_mask = p_vals < alpha
+    if np.any(sig_mask):
+        ax.contour(times, freqs, sig_mask, colors='black', linewidths=1)
+
+    ax.set_xlabel('Time (s)')
+    ax.set_ylabel('Frequency (Hz)')
+    ax.set_title(f'Significant Clusters (p < {alpha})')
+    return fig, ax
 
 def add_pacs_comparison_to_report(df,report,id, analysis_type='within_group'):
     low_fq_range = df["low_freqs"].values[0]
@@ -2099,7 +2127,7 @@ def plot_interaction_tfr(data, times, freqs):
     fig, name = plot_tf_comparison(
                 data_by_hemi, times, freqs, titles,
                 'interaction', cfg.output_dir, alpha=0.05, paired=False,
-                cmap='RdBu_r', vmin=None, vmax=None,data_type='tf',sig_mask=False,
+                cmap='RdBu_r', vmin=None, vmax=None,data_type='pac',sig_mask=False,
                 return_masks=False,add_vlines=True)
 
     return fig
@@ -2228,3 +2256,100 @@ def run_glm(data, metadata_df, formula, return_design=False, verbose=True):
         return betas, pvals, predictor_names, design
     else:
         return betas, pvals
+
+def analyse_interaction(df):
+    data = np.stack(df[cfg.data_var].values)
+    metadata = df[['Diagnosis', 'Condition']].copy()
+    betas, pvals = run_glm(data,metadata,'C(Diagnosis) * C(Condition)')
+    return betas, pvals
+
+def source_modeling(subject,outputdir,subjID_date,visit_date,info,overwrite = False):
+    out_fname = find_files('_AttenVis_run01_fwd.fif',outputdir)
+    if os.path.exists(out_fname) and not overwrite:
+        print('>>> Forward solution saved in %s as %s' % (outputdir,out_fname))
+    else:
+        trans   = os.path.join(cfg.recons_dir,'_'.join(subjID_date),'_'.join([visit_date,"trans.fif"])) 
+        try:
+            src = mne.setup_source_space(subject=subject, spacing='oct6',
+                                        add_dist="patch", subjects_dir=cfg.recons_dir)
+            print("Successfully created source space with oct6.")
+        except Exception as e2:
+            with open(cfg.inv_error_log_path, 'a') as f:
+                f.write(f"\n[{subject}] Failed to create oct6 source space too:\n")
+                traceback.print_exc(file=f)
+            raise RuntimeError(f"Failed to create source space for subject {subject} with both oct7 and oct6.")
+        src.save(os.path.join(outputdir,out_fname).replace('_fwd.fif','_src.fif'), overwrite=True)  
+        # create subject BEM model
+        conductivity = (0.3,)   # for single layer for MEG source estimation (conductivity = (0.3, 0.006, 0.3) for three layers)
+        mindist      = 3.0      # important not to use too large mindist because the cerebellar cortex and inner skull boundary are usually within 5 mm
+        model        = mne.make_bem_model(subject=subject, ico=4, conductivity=conductivity, subjects_dir=cfg.recons_dir)
+        bem          = mne.make_bem_solution(model)
+
+        # compute and save forward solution
+        fwd          = mne.make_forward_solution(info, trans=trans, src=src, bem=bem, meg=True, eeg=False, mindist=mindist, n_jobs=1, verbose=True)
+        mne.write_forward_solution(os.path.join(outputdir,out_fname), fwd, overwrite=True)
+        print('>>> Forward solution saved in %s' % (outputdir))
+
+def plot_source_modeling(info=None, cerebellum=False, subject=None, subjects_dir=None, trans=None, src=None, visit=None):
+    """
+    Plots diagnosis of source modeling procedures (BEM, corregistration & sources)
+    """
+
+    print('>>> Adding diagnostic plots for source modeling to mne report\n')
+
+    # create canvas
+    fig = plt.figure(figsize=(18,12), layout='constrained')
+    gs  = GridSpec(2, 2, figure=fig) 
+    ax1 = fig.add_subplot(gs[0,0])
+    ax2 = fig.add_subplot(gs[1,0])
+    ax3 = fig.add_subplot(gs[:,1])
+    # visualize bem surfaces
+    plot_bem_kwargs = dict(subject=subject, subjects_dir=subjects_dir, brain_surfaces="white", orientation="coronal", slices=[50, 100, 150, 200])
+    mne.viz.plot_bem(**plot_bem_kwargs, show=False)
+    plt.savefig(f"{subject}_bem.tiff",dpi=300)  
+    close()
+    # visualize co-rregistration
+    corrfig = mne.viz.plot_alignment(info, trans, subject=subject, dig=True, meg=["helmet", "sensors"], src=src, subjects_dir=subjects_dir, surfaces="head")
+    corrfig.plotter.screenshot(f"{subject}_correg.tiff") 
+    corrfig.plotter.close() 
+    # visualize source space
+    mne.viz.plot_bem(src=src, **plot_bem_kwargs) 
+    plt.savefig(f"{subject}_sources.tiff",dpi=300) 
+    close()
+    # locate images in canvas
+    ax1.imshow(plt.imread(f"{subject}_bem.tiff"))
+    ax1.axis('off')
+    ax2.imshow(plt.imread(f"{subject}_sources.tiff"))
+    ax2.axis('off')
+    ax3.imshow(plt.imread(f"{subject}_correg.tiff"))
+    ax3.axis('off')
+    # delete temporary figures from directory
+    figs2delete = glob(join(getcwd(),'*.tiff'))
+    if bool(figs2delete):
+        for tiff_file in figs2delete:
+            if subject in tiff_file:
+                subprocess.run(["rm",tiff_file])
+    # update mne report
+    if 'fs' in subject:
+        fig.suptitle('No MRI available for this visit. Source space computed using fsaverage')
+        subject = split(trans)[1].split('_')[0]
+    else:
+        fig.suptitle('Source space computed using subject MRI')
+    title   = 'sources' if not cerebellum else 'full sources'
+    if 'AC' in subject:
+        subject = subject.replace('AC','0AC')
+    section = subject.split('_')[0] + '_' + visit
+
+    return fig, title, section
+
+def add_figures_to_report(results):
+    """
+    Adds figure to mne report
+    """
+    report  = mne.open_report(os.path.join(cfg.paradigm_dir,cfg.report_name))
+
+    for sub, fig, title, section in results:
+        report.add_figure(fig=fig, title=title, section=section, tags = 'src',replace=True)
+        plt.close(fig)
+
+    report.save(os.path.join(cfg.paradigm_dir,cfg.report_name), verbose=False, overwrite=True)

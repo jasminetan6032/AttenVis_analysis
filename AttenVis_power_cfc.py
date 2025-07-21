@@ -63,29 +63,36 @@ def get_pac_in_label(sub_id,overwrite_data=False):
         pics = tlbx.plot_participant_pacs(df_participant,sub_id)
     return sub_id,pics
 
-n_jobs = 8
+# n_jobs = 8
 
-debug = False
-if debug:
-    n_jobs = 1
+# debug = False
+# if debug:
+#     n_jobs = 1
 
-parallel, run_func, _ = parallel_func(get_pac_in_label, n_jobs=n_jobs)
-results = parallel(run_func(participant) for participant in participants_to_study)
+# parallel, run_func, _ = parallel_func(get_pac_in_label, n_jobs=n_jobs)
+# results = parallel(run_func(participant) for participant in participants_to_study)
 
-report = tlbx.generate_report()
-for sub_id, pics in results:
-    for pic, title, condition in pics:
-        report.add_figure(fig=pic, title=title, section=sub_id, tags=[condition,'pac'], replace=True)
-        plt.close(pic)
+# report = tlbx.generate_report()
+# for sub_id, pics in results:
+#     for pic, title, condition in pics:
+#         report.add_figure(fig=pic, title=title, section=sub_id, tags=[condition,'pac'], replace=True)
+#         plt.close(pic)
 
-report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
+# report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
 df = tlbx.collate_participants_data(participants_df,participants_to_study)
 # participants_to_study = tlbx.update_participants_n(df,cfg.excluded_participants,cfg.paradigm)
 
+interaction_by_hemi = []
+# tlbx.add_interaction_plot_to_report(df,report,'gavg')
+for hemi in cfg.hemisphere:
+    df_hemi = df[df["hemisphere"] == hemi]
+    betas, pvals = tlbx.analyse_interaction(df_hemi)
+    interaction_by_hemi.append([betas,pvals])
+low_fq_range = df["low_freqs"].values[0]
+high_fq_range = df["high_freqs"].values[0]
+fig,ax = tlbx.plot_pval_clusters(interaction_by_hemi[1][1][3].T,low_fq_range,high_fq_range)
 tlbx.add_pacs_to_report(df,report,'gavg')
 tlbx.add_pacs_comparison_to_report(df,report,'gavg',analysis_type = 'within_group')
 tlbx.add_pacs_comparison_to_report(df,report,'gavg',analysis_type = 'between_group')
-
-tlbx.add_interaction_plot_to_report(df,report,'gavg')
 
 tlbx.show_report(cfg.report_savename_hdf5)

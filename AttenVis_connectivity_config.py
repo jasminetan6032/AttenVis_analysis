@@ -50,17 +50,20 @@ redraw_labels = False
 
 #power, source-localisation and connectivity settings
 freq_bands = {
-    'theta': (4, 8),
-    'alpha': (8, 12),
-    'beta': (12, 30),
-    'gamma': (30, 40)}  
-freq_band = 'beta'               
+    'theta': (4, 8, 3),
+    'alpha': (8, 12, 3),
+    'theta-alpha':(4,12, 3),
+    'beta': (12, 30, 7),
+    'gamma': (30, 80, 15),
+    'all_low_bands':(4,40,None),
+    'all_bands': (4,80,None)}  
+freq_band = 'all_bands'               
 freq_min      = freq_bands[freq_band][0]
 freq_max      = freq_bands[freq_band][1]
 con_method    = "dSPM"
 fc_method     = 'coh'
 fc_mode       = 'cwt_morlet'
-con_n_cycles  = 7
+con_n_cycles  = freq_bands[freq_band][2]
 sfreq         = 250
 snr           = 0.3
 lambda2       = 1.0 / snr**2
@@ -69,8 +72,8 @@ baseline      = (-0.2,0.0)
 #plotting settings
 tmin_plot = 0
 tmax_plot = 1.5
-freq_min_plot = freq_min
-freq_max_plot = freq_max
+freq_min_plot = 4
+freq_max_plot = 20
 power_plot_lims         = [0,0.15,40,5] #min, max, division,division for colorbar
 power_line_plot_ylims = (-0.2,0.3)
 vlines = [0.8,1.15]

@@ -15,7 +15,7 @@ participants_df, participants_to_study = tlbx.load_participants()
 
 print("Saving as " + cfg.data_savename)
 
-def get_connectivity(sub_id,overwrite_data=True):
+def get_connectivity(sub_id,overwrite_data=False):
     """    Compute functional connectivity for a given subject."""
     participant_data = []
     diagnosis, study,visit_dir,subjID_date = tlbx.read_participant_details_from_dataframe(participants_df,sub_id)
@@ -51,7 +51,7 @@ def get_connectivity(sub_id,overwrite_data=True):
             # this is some stuff we need to specify how FC is computed by the mne-connectivity toolbox
             indices        = mne_connectivity.seed_target_indices([0], [1])
             cwt_freqs      = np.arange(cfg.freq_min, cfg.freq_max+1, 1)
-            cwt_n_cycles   = cfg.con_n_cycles #cwt_freqs / 2.0  # number of cycles for the CWT
+            cwt_n_cycles   = cwt_freqs / 3 #cfg.con_n_cycles #  # number of cycles for the CWT
             seed_stcs = []
             target_stcs = []
             for hemi_idx, hemi in enumerate(cfg.hemisphere):
@@ -77,7 +77,7 @@ def get_connectivity(sub_id,overwrite_data=True):
 
     return sub_id
 
-n_jobs = 2
+n_jobs = 1
 
 debug = False
 if debug:
