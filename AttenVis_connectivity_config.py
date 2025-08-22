@@ -4,6 +4,7 @@ local_dir = '/autofs/space/hypatia_002/users/Jasmine/'
 paradigm = 'AttenVis'
 analysis_type = 'connectivity'
 data_var = 'connectivity_data' 
+recipient = 'jtan15@mgh.harvard.edu'
 if paradigm == 'Misophonia_ASD_TD':
     data_dir = os.path.join(local_dir, 'Misophonia',paradigm)
 else:
@@ -35,7 +36,7 @@ epochs_to_use_dict = {'stimuli': '_nobaseline_nofilter_all_conditions_metadata_e
                  'response': '_nobaseline_nofilter_all_conditions_metadata_response_epo.fif'}
 epochs_to_use = epochs_to_use_dict[stimuli_or_response]
 
-time_windows = [0,1.5]  #[-0.5,2.5]
+time_windows = [0,2.5]  #[-0.5,2.5]
 prestimulus_baseline = (-0.2, 0.0)
 
 peak_time_window = [0.9,1.2]
@@ -54,13 +55,14 @@ freq_bands = {
     'alpha': (8, 12, 3),
     'theta-alpha':(4,12, 3),
     'beta': (12, 30, 7),
-    'gamma': (30, 80, 15),
+    'gamma': (60, 120, 15),
     'all_low_bands':(4,40,None),
     'all_bands': (4,80,None)}  
-freq_band = 'all_bands'               
-freq_min      = freq_bands[freq_band][0]
-freq_max      = freq_bands[freq_band][1]
-con_method    = "dSPM"
+freq_band = 'all_low_bands'
+freq_band_to_analyse = 'gamma'            
+freq_min      = 4 #freq_bands[freq_band][0]
+freq_max      = 30 #freq_bands[freq_band][1]
+con_method    = "MNE"
 fc_method     = 'coh'
 fc_mode       = 'cwt_morlet'
 con_n_cycles  = freq_bands[freq_band][2]
@@ -72,14 +74,14 @@ baseline      = (-0.2,0.0)
 #plotting settings
 tmin_plot = 0
 tmax_plot = 1.5
-freq_min_plot = 4
-freq_max_plot = 20
+freq_min_plot = 4 #freq_bands[freq_band_to_analyse][0]
+freq_max_plot = 15 #freq_bands[freq_band_to_analyse][1]
 power_plot_lims         = [0,0.15,40,5] #min, max, division,division for colorbar
 power_line_plot_ylims = (-0.2,0.3)
 vlines = [0.8,1.15]
 alpha = 0.05
-vmin = -1.0
-vmax = 1.0
+vmin = None
+vmax = None
 fontsize = 20
 confidence = 0.95 #ci interval for line plots
 ylims = (0,0.2)
@@ -110,7 +112,8 @@ labels_dict = {
     'TPJ'       :   ['TPJ'],
     'visual_drawn_label':['vis'],
     'cingulate': ['G_and_S_cingul-Ant','G_and_S_cingul-Mid-Ant','G_and_S_cingul-Mid-Post'],
-    'cingulate_grown':['cingulate']
+    'cingulate_grown':['cingulate'],
+    'intraparietal_grown':['intraparietal']
 }
 
 if 'electrodes' not in labels_of_interest:
@@ -134,7 +137,7 @@ else:
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
-save_fname = '_'.join([analysis_type] + [freq_band] + [stimuli_or_response] + selected_conditions + labels_of_interest + [con_method]+[str(time_windows[0]),str(time_windows[1])]) #
+save_fname = '_'.join([analysis_type] + [freq_band] + [stimuli_or_response] + selected_conditions + labels_of_interest + [con_method]+[str(time_windows[0]),str(time_windows[1])]+['fixed_cycles_5']) #
 data_fname = save_fname + '.pkl'
 data_savename = os.path.join(output_dir,data_fname)
 peak_times_savename = os.path.join(output_dir,save_fname + '_peak_times.pkl')
@@ -149,6 +152,7 @@ connectivity_save_fname = '_'.join(selected_conditions + labels_of_interest + [c
 connectivity_compare_data_fname = connectivity_save_fname + '.pkl'
 connectivity_compare_data_savename = os.path.join(output_dir,connectivity_compare_data_fname)
 connectivity_coh_data_fname = connectivity_compare_data_savename.replace(".pkl","_coh_peak.pkl")
+permutation_data_fname = connectivity_compare_data_savename.replace(".pkl","_permutation.pkl")
 con_report_savename_html = os.path.join(output_dir,connectivity_save_fname+".html")
 con_report_savename_hdf5 = os.path.join(output_dir,connectivity_save_fname+".hdf5")
 

@@ -2,8 +2,9 @@ import os
 
 local_dir = '/autofs/space/hypatia_002/users/Jasmine/'
 paradigm = 'AttenVis'
-analysis_type = 'cross_freq' 
-data_var = 'pac'
+analysis_type = 'power' 
+data_var = 'power'
+recipient = 'jtan15@mgh.harvard.edu'
 if paradigm == 'Misophonia_ASD_TD':
     data_dir = os.path.join(local_dir, 'Misophonia',paradigm)
 else:
@@ -12,8 +13,8 @@ savedir = os.path.join(data_dir,'analyses',analysis_type)
 
 #experiment details 
 condition = {
-            'search': {'label':'Search'},
-            'pop-out': {'label':'Pop-out'}
+            'search': {'label':'Search', 'color': 'purple'},
+            'pop-out': {'label':'Pop-out', 'color': 'green'}
             #  'conditions_combined': {'label':'Combined'}
              }
 difficulty = {'4': {'label':'4'},
@@ -31,14 +32,14 @@ sensor_hemis = ['left','right']
 hemisphere = ['lh','rh']
 
 #what you're investigating: label, view of label and whether to use stimuli-locked or response-locked epochs
-labels_of_interest = ['V1']
+labels_of_interest = ['DLPFC']
 brain_view = 'lat'
 stimuli_or_response = 'stimuli'
 epochs_to_use_dict = {'stimuli': '_nobaseline_nofilter_all_conditions_metadata_epo.fif', #-0.5 to 2.5s
                  'response': '_nobaseline_nofilter_all_conditions_metadata_response_epo.fif'} #-1.5 to 0.5s
 epochs_to_use = epochs_to_use_dict[stimuli_or_response]
 
-time_windows = [0.8, 1.15]#[-1.5,0.5]  # [0.9,1.2]
+time_windows = [-0.5, 2.5]#[-1.5,0.5]  # [0.9,1.2]
 prestimulus_baseline = (-0.2, 0.0)
 
 peak_time_window = [0.9,1.2]
@@ -52,14 +53,17 @@ overwrite_epochs = False
 redraw_labels = False
 
 #power, source-localisation and connectivity settings
-high_or_low_freq = 'high'  # 'high' or 'low'
-if high_or_low_freq == 'high':
-    freq_min      = 30
-    freq_max      = 80
-else:
-    freq_min      = 4
-    freq_max      = 40                 
-
+freq_bands = {
+    'theta': (4, 8, 3),
+    'alpha': (8, 12, 3),
+    'theta-alpha':(4,12, 3),
+    'beta': (12, 30, 7),
+    'gamma': (60, 120, 15),
+    'all_low_bands':(4,40,None),
+    'all_bands': (4,120,None)}  
+freq_band = 'all_bands'
+freq_min      = freq_bands[freq_band][0]
+freq_max      = freq_bands[freq_band][1]
 con_method    = "MNE"
 pac_method    = 'penny' #  'ozkurt'
 fc_method     = 'coh'
@@ -73,15 +77,15 @@ baseline      = (-0.5,0.0)
 #plotting settings
 tmin_plot               =  -0.3 #-1.5 #-0.3
 tmax_plot               =  1.5 #0.5 #1.5
-freq_min_plot           = 30 #4
-freq_max_plot           = 80
+freq_min_plot           = 4 
+freq_max_plot           = 12
 power_line_plot_ylims   = (-0.05,0.05)
 power_plot_lims         = [-0.05,0.05,40,5] #min, max, division,division for colorbar
 crossfreq_plot_lims     = [0,0.15,15,7] #min, max, division,division for colorbar
-vlines                  = [0.0,0.8]
-alpha = 0.05
-vmin                    = -1.0
-vmax                    = 1.0
+vlines                  = [0.0, 0.8, 1.1]
+alpha                   = 0.05
+vmin                    = -0.055
+vmax                    = 0.055
 fontsize                = 20
 confidence              = 0.95 #ci interval for line plots
 ylims                   = (0,10)
@@ -135,7 +139,8 @@ else:
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
-save_fname = '_'.join([analysis_type] + [stimuli_or_response] + [high_or_low_freq] + list(condition.keys()) + labels_of_interest + [con_method]+[str(time_windows[0]),str(time_windows[1])]) # 
+save_fname = '_'.join([analysis_type] + [stimuli_or_response] + [freq_band] + list(condition.keys()) #selected_conditions
+                      + labels_of_interest + [con_method]+[str(time_windows[0]),str(time_windows[1])]) #
 data_fname = save_fname + '.pkl'
 data_savename = os.path.join(output_dir,data_fname)
 peak_times_savename = os.path.join(output_dir,save_fname + '_peak_times.pkl')
@@ -149,6 +154,7 @@ morph_report_savename_hdf5 = os.path.join(output_dir,morph_report_savename+".hdf
 connectivity_save_fname = '_'.join(selected_conditions + labels_of_interest + [con_method]+[str(time_windows[0]),str(time_windows[1])])
 connectivity_compare_data_fname = connectivity_save_fname + '.pkl'
 connectivity_compare_data_savename = os.path.join(output_dir,connectivity_compare_data_fname)
+permutation_data_fname = connectivity_compare_data_savename.replace(".pkl","_permutation.pkl")
 connectivity_coh_data_fname = connectivity_compare_data_savename.replace(".pkl","_coh_peak.pkl")
 con_report_savename_html = os.path.join(output_dir,connectivity_save_fname+".html")
 con_report_savename_hdf5 = os.path.join(output_dir,connectivity_save_fname+".hdf5")
@@ -161,19 +167,35 @@ rt_data_savename = os.path.join(data_dir,"RTs_all_answers.pkl")
 inv_report_title = 'AttenVis Prestimulus Inverses ' +  '-'.join([stimuli_or_response,'locked'])
 report_title = '_'.join(list(condition.keys()) + labels_of_interest + [con_method])
 
-color_dict = {"search":"orchid",
-            "pop-out":"limegreen",
-            "target":"cyan",
-            "asd":"darkorange",
-            "td":"violet",
-            "search/4":"violet",
-            "search/6":"fuchsia",
-            "search/8":"mediumorchid",
-            "search/10":"darkmagenta",
-            "pop-out/4":"greenyellow",
-            "pop-out/6":"lawngreen",
-            "pop-out/8":"forestgreen",
-            "pop-out/10":"darkgreen"}
+# color_dict = {"search":"orchid",
+#             "pop-out":"limegreen",
+#             "target":"cyan",
+#             "asd":"darkorange",
+#             "td":"violet",
+#             "search/4":"violet",
+#             "search/6":"fuchsia",
+#             "search/8":"mediumorchid",
+#             "search/10":"darkmagenta",
+#             "pop-out/4":"greenyellow",
+#             "pop-out/6":"lawngreen",
+#             "pop-out/8":"forestgreen",
+#             "pop-out/10":"darkgreen"}
+
+from matplotlib.colors import to_hex, to_rgb
+
+# Generate hierarchical color dictionary
+color_dict = {}
+
+for cond_key, cond_info in condition.items():
+    base_rgb = to_rgb(cond_info['color'])  # read base color from condition dict
+    color_dict[cond_key] = {}
+    
+    n_groups = len(diagnoses)
+    for i, (diag_key, diag_info) in enumerate(diagnoses.items()):
+        # Linear shading: darker for first group, lighter for last
+        factor = 0.7 + 0.5 * i / (n_groups - 1) if n_groups > 1 else 1.0
+        shade_rgb = [min(c * factor, 1.0) for c in base_rgb]
+        color_dict[cond_key][diag_key] = to_hex(shade_rgb)
 
 #recons and fsaverage directories
 subj_dir = '/autofs/space/transcend/MRI/WMA/recons/'

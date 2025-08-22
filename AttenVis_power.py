@@ -35,6 +35,8 @@ def get_power_in_label(sub_id,overwrite_data=False):
             print(epo_load_fname)
             epochs = mne.read_epochs(epo_load_fname)
             epochs   = epochs.resample(cfg.sfreq)
+            # difficulty_mask = (epochs.metadata['difficulty'] =='8') | (epochs.metadata['difficulty']=='10')
+            # select_epochs = epochs[difficulty_mask]
 
             for hemi in cfg.hemisphere:
                 #load_labels 
@@ -63,47 +65,55 @@ def get_power_in_label(sub_id,overwrite_data=False):
         df_participant = pd.read_pickle(participant_data_savename)
         pics = tlbx.plot_participant_tfrs(df_participant,sub_id)
     return sub_id, pics
-# n_jobs = 8
+n_jobs = 8
 
-# debug = False
-# # participants_to_study = ['008301','009901','011201','011301','011302']
-# if debug:
-#     n_jobs = 1
+debug = False
+# participants_to_study = ['008301','009901','011201','011301','011302']
+if debug:
+    n_jobs = 1
 
-# parallel, run_func, _ = parallel_func(get_power_in_label, n_jobs=n_jobs)
-# results = parallel(run_func(subject) for subject in participants_to_study)
+parallel, run_func, _ = parallel_func(get_power_in_label, n_jobs=n_jobs)
+results = parallel(run_func(subject) for subject in participants_to_study)
 
 report = tlbx.generate_report()
 
-# for sub_id, pics in results:
-#     for pic, title, condition in pics:
-#         report.add_figure(fig=pic, title=title, section=sub_id, tags=[condition,'power'], replace=True)
-#         plt.close(pic)
+for sub_id, pics in results:
+    for pic, title, condition in pics:
+        report.add_figure(fig=pic, title=title, section=sub_id, tags=[condition,'power'], replace=True)
+        plt.close(pic)
 
 report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
 
 df = tlbx.collate_participants_data(participants_df,participants_to_study)
+time = df["time"].values[0]  # assuming same across rows
+freqs = np.arange(cfg.freq_min, cfg.freq_max+1)
+df["power"] = df["power"].apply(lambda arr: tlbx.extract_time_frequency_data(arr, time, (cfg.tmin_plot, cfg.tmax_plot), freqs, (cfg.freq_min_plot, cfg.freq_max_plot)))
 
 mpl.rcParams["svg.fonttype"] = "none"
+    
+# tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Diagnosis','Theta-Alpha',(4,12),ci=False)
+# tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Condition','Theta-Alpha',(4,12),ci=False)
+
+# tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Diagnosis','Gamma',(60,120),ci=False)
+# tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Condition','Gamma',(60,120),ci=False)
+
+interaction_by_hemi = []
+# tlbx.add_interaction_plot_to_report(df,report,'gavg')
+for hemi in cfg.hemisphere:
+    df_hemi = df[df["hemisphere"] == hemi]
+    observed_clusters, p_corrected, pval_map = tlbx.analyse_interaction(df_hemi,cluster_corrected=True)
+    interaction_by_hemi.append([pval_map, p_corrected])
 
 tlbx.add_tfrs_to_report(df,report,'gavg')
-tlbx.add_tfrs_comparison_to_report(df,report,'gavg',analysis_type = 'within_group')
-tlbx.add_tfrs_comparison_to_report(df,report,'gavg',analysis_type = 'between_group' )
-    
-tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Diagnosis','Theta-Alpha',(6,12),ci=False)
-tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Condition','Theta-Alpha',(6,12),ci=False)
-tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Diagnosis','Theta',(4,8),ci=False)
-tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Condition','Theta',(4,8),ci=False)
-tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Diagnosis','Alpha',(8,12),ci=False)
-tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Condition','Alpha',(8,12),ci=False)
-tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Diagnosis','Beta',(13,30),ci=False)
-tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Condition','Beta',(13,30),ci=False)
-# tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Diagnosis','Gamma',(60,80),ci=False)
-# tlbx.add_gavg_power_over_time_to_report(df,report,'gavg','Condition','Gamma',(60,80),ci=False)
-
-# tlbx.add_interaction_plot_to_report(df,report,'gavg')
-
+tlbx.add_tfrs_comparison_to_report(df,report,'gavg',analysis_type = 'within_group',extra_masks=interaction_by_hemi)
+tlbx.add_tfrs_comparison_to_report(df,report,'gavg',analysis_type = 'between_group',extra_masks=interaction_by_hemi )
 # tlbx.add_fsaverage_to_report(report,df,cfg.labels_of_interest[0] + '_grown')
+
+df['power_to_plot'] = df_hemi['power'].apply(lambda arr: tlbx.extract_time_frequency_data(arr, time, (0.8,1.1), freqs, None))
+
+for hemi in cfg.hemisphere:
+    df_hemi = df[df["hemisphere"] == hemi]
+    tlbx.plot_swarmplots_for_report(df_hemi, 'Diagnosis', 'power_to_plot', report, out_prefix= '_'.join([hemi, str(cfg.freq_min), str(cfg.freq_max), 'power']))
 
 tlbx.show_report(cfg.report_savename_hdf5)
 

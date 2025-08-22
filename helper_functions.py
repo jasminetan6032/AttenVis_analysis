@@ -13,11 +13,12 @@ from autoreject import get_rejection_threshold, AutoReject
 import scipy
 import pickle
 import csv
-from scipy.stats import ttest_ind, f_oneway
-from scipy.stats import ttest_rel, ttest_ind
+from scipy.stats import ttest_ind, f_oneway, ttest_rel
 from scipy.ndimage import label
-import matplotlib.patches as mpatches
+from matplotlib.lines import Line2D
 from statsmodels.stats.multitest import fdrcorrection
+from mne.stats import permutation_cluster_test, permutation_cluster_1samp_test
+from matplotlib.transforms import Bbox
 
 import AttenVis_power_config as cfg
 
@@ -40,10 +41,10 @@ def find_files(search_string,data_dir):
                 
     return files  
 
-def rename_files(participant,original,new_name,copy=False):
+def rename_files(participant,filename,original,new_name,copy=False):
     participant_dir = os.path.join(cfg.data_dir,participant)
     print(participant_dir)
-    files_to_rename = find_files(original,participant_dir)
+    files_to_rename = find_files(filename,participant_dir)
     files_to_rename.sort()
     if not files_to_rename:
         print('no files found')
@@ -56,7 +57,7 @@ def rename_files(participant,original,new_name,copy=False):
                 shutil.copy(file, new_filename)
             else:
                 os.rename(file,new_filename)
-        check_files = find_files(original,participant_dir)
+        check_files = find_files(file,participant_dir)
         check_files.sort()
         if check_files:
             print('Files have been successfully renamed!')
@@ -478,9 +479,9 @@ def plot_pac(low_fq_range, high_fq_range, condition, output_dir, data_list, titl
 def add_tfrs_to_report(df,report,id,hemi_label = None):
     times = df["time"].values[0]
     time_to_plot = [find_nearest(times,cfg.tmin_plot),find_nearest(times,cfg.tmax_plot)]
-    time_for_plot = times[time_to_plot[0]:time_to_plot[1]]
+    time_for_plot = times[time_to_plot[0]:time_to_plot[1]+1]
     freqs = np.arange(cfg.freq_min,cfg.freq_max+1,1)
-    freq_to_plot = [np.where(freqs==cfg.freq_min_plot)[0][0],np.where(freqs==cfg.freq_max_plot)[0][0]]
+    freq_to_plot = [np.where(freqs==cfg.freq_min_plot)[0][0],np.where(freqs==cfg.freq_max_plot)[0][0]+1]
     for condition in cfg.brain_selected_conditions:
         image_names = []
         for hemi in cfg.hemisphere:
@@ -498,8 +499,8 @@ def add_tfrs_to_report(df,report,id,hemi_label = None):
                     avg_data = np.stack(df_to_plot['power'].values).mean(axis=0)
                 else:
                     avg_data = np.stack(df_to_plot['connectivity_data'].values).mean(axis=0)
-                sliced_data = avg_data[freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
-                datasets.append(sliced_data)
+                # sliced_data = avg_data[freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
+                datasets.append(avg_data)
             titles = [cfg.diagnoses[diag]['label_n'] for diag in cfg.diagnoses]
 
             fig1, name = plot_time_frequency(time_for_plot,freqs[freq_to_plot[0]:freq_to_plot[1]],condition,cfg.output_dir,datasets,titles, hemi=hemi,add_vlines=cfg.vlines)
@@ -730,7 +731,7 @@ def plot_line(df,variable,ax,label,color,freqs = None,ci=False,group=False):
 
     return ax
 
-def compute_sig_mask(df, factor_name, variable='stc', alpha=0.05, paired=False,freqs = None,fdr = True):
+def compute_sig_mask(df, factor_name, variable='stc', alpha=0.05, paired=False,freqs = None,fdr = False,cluster_correction=True):
     """
     Computes a significance mask across time points between levels of a categorical variable.
 
@@ -777,22 +778,39 @@ def compute_sig_mask(df, factor_name, variable='stc', alpha=0.05, paired=False,f
 
     if len(cfg.df_varnames[factor_name]) == 2:
         data1, data2 = data_by_level
-        if paired:
-            from scipy.stats import ttest_rel
-            t_stats, p_vals = ttest_rel(data1, data2, axis=0)
+
+        if cluster_correction:
+            X = [data1, data2]
+            if paired:
+                X_diff = data1 - data2
+                T_obs, clusters, cluster_pv, _ = permutation_cluster_1samp_test(
+                    X_diff, n_permutations=1000, threshold=None, tail=0, n_jobs=1, out_type='mask')
+            else:
+                T_obs, clusters, cluster_pv, _ = permutation_cluster_test(
+                    X, n_permutations=1000, tail=0, n_jobs=1, out_type='mask')
+
+            sig_mask = np.zeros(n_times, dtype=bool)
+            for cluster, p_val in zip(clusters, cluster_pv):
+                if p_val < alpha:
+                    sig_mask[cluster] = True
+            p_vals = cluster_pv  # Optional: store for record-keeping
+            p_vals_corr = None   # No p-value per time point in cluster test
         else:
-            t_stats, p_vals = ttest_ind(data1, data2, axis=0, equal_var=False)
+            if paired:
+                t_stats, p_vals = ttest_rel(data1, data2, axis=0)
+            else:
+                t_stats, p_vals = ttest_ind(data1, data2, axis=0, equal_var=False)
+
+            rej, p_vals_corr = fdrcorrection(p_vals, alpha=alpha, method='n', is_sorted=False)
+            sig_mask = rej if fdr else p_vals < alpha
     else:
-        # ANOVA for each time point
+        # More than 2 levels – ANOVA for each time point
         p_vals = np.array([
             f_oneway(*(group[:, t] for group in data_by_level))[1]
             for t in range(n_times)
         ])
-    rej, p_vals_corr = fdrcorrection(p_vals, alpha=alpha, method='n', is_sorted=False)
-    if fdr:
-        sig_mask = rej
-    else:
-        sig_mask = p_vals < alpha
+        rej, p_vals_corr = fdrcorrection(p_vals, alpha=alpha, method='n', is_sorted=False)
+        sig_mask = rej if fdr else p_vals < alpha
     time = df['time'].values[0]
     time_to_plot = [find_nearest(time,cfg.tmin_plot),find_nearest(time,cfg.tmax_plot)]
     time_for_plot_sig_mask = sig_mask[time_to_plot[0]:time_to_plot[1]]
@@ -1021,8 +1039,11 @@ def get_coh_stc(df,plot_type):
     return coh_stc, con_subjID_date
         
 
-def plot_coh_conditions(ax,df,tag,factor,factor_name_in_df,ylims,freqs = None,ci=False,group=False,plot_title=None,highlight_area=False,area_time_window=None,zcoh=False):
-
+def plot_coh_conditions(ax,df,tag,factor,factor_name_in_df,ylims,freqs = None,ci=False,group=False,plot_title=None,
+                        highlight_area=False,area_time_window=None,zcoh=False,paired=True,sig_mask=None):
+    time = df['time'].values[0]
+    time_to_plot = [find_nearest(time,cfg.tmin_plot),find_nearest(time,cfg.tmax_plot)]
+    time_for_plot = time[time_to_plot[0]:time_to_plot[1]]
     for level in factor:       
         df_to_plot = df[(df[factor_name_in_df]==level)]
         ax = plot_line(df_to_plot,'connectivity_data',ax,cfg.plot_labels[level]['label'],cfg.color_dict[level],ci=ci,group=group,freqs = freqs)
@@ -1052,6 +1073,9 @@ def plot_coh_conditions(ax,df,tag,factor,factor_name_in_df,ylims,freqs = None,ci
     if cfg.vlines is not None:
         for vline in cfg.vlines:
             ax.axvline(x=vline, ls='--', color='k')
+    if sig_mask is not None:
+        sig_mask, p_vals = compute_sig_mask(df, factor_name_in_df, variable=cfg.data_var, alpha=cfg.alpha, paired=paired,freqs=freqs)
+    add_significance_bar(ax, sig_mask, time_for_plot)
 
     return ax
 
@@ -1184,7 +1208,7 @@ def add_gavg_coh_to_report(df,report,id,factor_name_in_df,freqs = None,zcoh=Fals
         ylims = cfg.ylims
         report_tag = 'coherence'
         grouping_factor = cfg.df_varnames[factor_name_in_df]
-    for factor_level in grouping_factor:
+    for factor_level in grouping_factor: #grouping factor is either diagnosis or condition, referring to the larger plot, so grouping by diagnosis means comparing across conditions, while grouping by condition means comparing across groups
         fig = plt.figure(figsize=(12,12), layout='constrained')
         gs  = GridSpec(2, 2, figure=fig) 
         ax1 = fig.add_subplot(gs[0,0])
@@ -1202,10 +1226,10 @@ def add_gavg_coh_to_report(df,report,id,factor_name_in_df,freqs = None,zcoh=Fals
                 df_to_plot = df[(df[factor_name_in_df] == factor_level) & (df['hemisphere'] == hemi) & (df['target_hemi'] == target_hemi)]
                 if factor_name_in_df == 'Condition':
                     plot_coh_conditions(hemi_axes[hemi][target_hemi],df_to_plot,factor_level + hemi_tag + ' to' + target_hemi_tag,
-                                        cfg.diagnoses,'Diagnosis',ylims,group=True,plot_title=plot_title,freqs=freqs,ci=ci)
+                                        cfg.diagnoses,'Diagnosis',ylims,group=True,plot_title=plot_title,freqs=freqs,ci=ci,sig_mask=True,paired=False)
                 elif factor_name_in_df == 'Diagnosis':
                     plot_coh_conditions(hemi_axes[hemi][target_hemi],df_to_plot,factor_level + hemi_tag + ' to' + target_hemi_tag,
-                                        cfg.selected_conditions,'Condition',ylims,group=True,plot_title=plot_title, freqs=freqs,ci=ci)
+                                        cfg.selected_conditions,'Condition',ylims,group=True,plot_title=plot_title, freqs=freqs,ci=ci,sig_mask=True,paired=True)
 
         title = '_'.join([id,factor_level,report_tag])
 
@@ -1226,30 +1250,68 @@ def get_zcoh(df_hemi,condition_of_interest,normalising_condition):
     return z_coh
 
 def barplot_with_swarmplot(ax,df,x_var,y_var):
-
+    cond = np.unique(df["Condition"].values)[0]
+    diagnosis = np.unique(df["Diagnosis"].values)[0]
     if np.unique(df[x_var].values)[0] in cfg.diagnoses:
-        palette = [cfg.color_dict["misophonia"],cfg.color_dict["td"]]
-        order = ['misophonia','td']
-        hue_order = ['misophonia','td']
-        labels = ['Misophonia','Controls']
+        palette = cfg.color_dict[cond]
+        order = cfg.diagnoses.keys()
+        hue_order = cfg.diagnoses.keys()
+        labels = [info['label'] for key, info in cfg.diagnoses.items()]
     elif np.unique(df[x_var].values)[0] in cfg.selected_conditions:
-        palette = [cfg.color_dict["miso"],cfg.color_dict["sound2"],cfg.color_dict["white_noise"]]
+        palette = cfg.color_dict[diagnosis]
         order = cfg.selected_conditions
         hue_order = cfg.selected_conditions
-        labels=['Trigger','Neutral','White Noise']
+        labels=[info['label'] for key, info in cfg.condition.items()]
     with sns.axes_style('ticks'):
         ax = sns.barplot(x=x_var, y=y_var, data=df, capsize=.1, errorbar='se', hue = x_var, ax = ax,
                          palette = palette,width = 0.6,order= order,hue_order= hue_order)
         ax = sns.swarmplot(x=x_var, y=y_var, data=df, color="0", alpha=.35,size = 9,order = order,ax=ax)
         ax.set_title('',fontsize = cfg.fontsize, fontweight="normal")
         ax.set_xlabel('',fontsize = cfg.fontsize, fontweight="normal")
-        ax.set_ylabel('Coherence (z)',fontsize = cfg.fontsize, fontweight="normal")
+        ax.set_ylabel('PAC',fontsize = cfg.fontsize, fontweight="normal")
         plt.yticks(fontsize = 16, weight = "normal")
         ax.set_xticklabels(labels=labels)
         plt.xticks(fontsize = 14, weight = "normal",rotation = 45,ha = 'right')
         sns.despine()
     
     return ax
+
+def apply_mask(df, variable, mask, flatten=False, summary=None):
+    """
+    Apply a mask to a column of arrays in a DataFrame, optionally summarizing.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing the arrays.
+    variable : str
+        Column name containing the arrays to mask.
+    mask : np.ndarray
+        Boolean or numeric mask of the same shape as the arrays.
+    flatten : bool
+        If True, returns only the masked elements as a 1D array per row.
+    summary : str or None
+        If 'mean', 'median', or 'max', computes that statistic across the masked elements.
+
+    Returns
+    -------
+    pd.Series
+        Masked arrays (or flattened masked values), or summary statistic per row.
+    """
+    def _mask_and_summarize(arr):
+        masked = arr * mask if not flatten else arr[mask]
+        if summary is None:
+            return masked
+        elif summary == "mean":
+            return masked.mean()
+        elif summary == "median":
+            return np.median(masked)
+        elif summary == "max":
+            return masked.max()
+        else:
+            raise ValueError("summary must be None, 'mean', 'median', or 'max'")
+    
+    return df[variable].apply(_mask_and_summarize)
 
 def add_connectivity_plot(df,report,timings,hemi,target_hemi,factor_name_in_df,id,zcoh=False):
     if zcoh:
@@ -1752,151 +1814,229 @@ def generate_report(inv = False):
         report.save(report_savename, overwrite=True)
 
     return report
+def plot_tf_panel(ax, x_axis, y_axis, diff, sig_mask=None, extra_masks=None,
+                    cmap='RdBu_r', vmin=None, vmax=None, overlay_styles=None,
+                    add_vlines=False):
+    levels = np.linspace(vmin,vmax,100)
+    cf = ax.contourf(x_axis, y_axis, diff, levels=levels,
+                        cmap=cmap, vmin=vmin, vmax=vmax, extend='both')
+
+    # Sig mask
+    if sig_mask is not None:
+        labeled, n_clusters = label(sig_mask)
+        for c in range(1,n_clusters+1):
+            ax.contour(x_axis, y_axis, labeled==c, colors='white', linewidths=1.5)
+
+    # Extra masks
+    if extra_masks is not None and overlay_styles is not None:
+        for i, extra_mask in extra_masks:
+            mask_to_add = extra_mask if extra_mask.dtype==bool else extra_mask<cfg.alpha
+            labeled_extra, n_extra = label(mask_to_add)
+            style = overlay_styles[i % len(overlay_styles)] 
+            for c in range(1,n_extra+1):
+                ax.contour(x_axis, y_axis, labeled_extra==c,
+                            colors=style['color'],
+                            linestyles=style['linestyle'],
+                            linewidths=1.5)
+
+    # Vertical lines
+    if add_vlines:
+        for line in cfg.vlines:
+            ax.axvline(x=line, color='black', linestyle='--', linewidth=1)
+
+    return cf
 
 def plot_tf_comparison(data_by_hemi, x_axis, y_axis, titles,
-                        grouping_label, output_dir, alpha=0.05, paired=True,
-                        cmap= 'RdBu_r', vmin=None, vmax=None,sig_mask = True, fdr = False, #'plasma'
-                        return_masks=False,data_type = 'tf',add_vlines = False,analysis_type=False):
+                       grouping_label, output_dir, alpha=0.05, paired=True,
+                       cmap='RdBu_r', vmin=None, vmax=None,
+                       sig_mask=True, extra_masks=None, fdr=False,
+                       return_masks=False, data_type='tf',
+                       add_vlines=False, analysis_type=False,
+                       masks_legend=False):
     """
     Compare TF plots between two conditions and draw contours around significant differences.
+        Saves both combined figure and per-hemisphere figures, with optional mask legends.
+
 
     Parameters
     ----------
     data_by_hemi : list of [data1, data2] pairs
         Each item is a list or tuple: [cond1_data, cond2_data], shape = (n_subjects, freqs, times).
-        So the input is [[lh_search, lh_popout], [rh_search, rh_popout]].
-    x_axis : array-like
-        Driver frequency axis (e.g., 4–40 Hz) or time axis.
-    y_axis : array-like
-        Frequency axis.
+    x_axis, y_axis : array-like
+        Axes for plotting (e.g. time and frequency).
     titles : list of str
-        Titles for each panel (e.g., ['Left Hemisphere', 'Right Hemisphere']).
-    condition : str
-        Name of the condition for figure title.
+        Plot titles for each subplot.
+    grouping_label : str
+        Used in figure title and filename.
     output_dir : str
-        Where to save the figure.
+        Directory to save figure.
     alpha : float
         Significance threshold.
     paired : bool
-        Whether to use paired t-test.
-    hemi : str or None
-        Hemisphere label to include in file name.
+        Use paired t-test if True.
     cmap : str
         Colormap for plotting.
     vmin, vmax : float
-        Manual color limits.
+        Color scale limits.
+    sig_mask : bool
+        Whether to compute and display a t-test significance mask.
+    extra_masks : list of arrays or None
+        Optional list of masks to overlay as colored contours. 
+        Will also have to be a list of lists by hemisphere
+    fdr : bool
+        Apply FDR correction if True.
     return_masks : bool
-        Whether to return sig_masks and p_vals for further use.
+        Whether to return computed significance masks and p-value maps.
+    data_type : str
+        'tf' or 'pac', used for orientation of data.
+    add_vlines : bool
+        Whether to add vertical reference lines.
+    analysis_type : str or bool
+        Used to label interaction plots.
 
     Returns
     -------
-    fig : matplotlib.figure.Figure
+    fig : matplotlib Figure
     savename : str
     (optional) sig_masks : list of bool arrays
-    (optional) p_vals : list of float arrays
+    (optional) pval_maps : list of float arrays
     """
+    # Define overlay specs
+    overlay_styles = [
+        # {'label': 'T-test', 'color': 'white', 'linestyle': 'solid'},
+        {'label': 'Interaction', 'color': 'black', 'linestyle': 'dashed'},
+        {'label': 'Cluster-corrected', 'color': 'gold', 'linestyle': 'dotted'}
+    ]
+    legend_elements = [Line2D([0], [0], color=s['color'], linestyle=s['linestyle'],
+                              linewidth=2, label=s['label']) for s in overlay_styles]
+    
     SMALL_SIZE = 22
     plt.rcParams["font.family"] = "DejaVu Sans"
     plt.rc('font', size=SMALL_SIZE)
     plt.rc('axes', titlesize=SMALL_SIZE)
     plt.rcParams['figure.constrained_layout.use'] = True
-    levels = np.linspace(cfg.power_plot_lims[0], cfg.power_plot_lims[1], cfg.power_plot_lims[2])
 
     n_panels = len(data_by_hemi)
     fig, ax = plt.subplots(1, n_panels, figsize=(6 * n_panels, 5))
-    if n_panels == 1:
-        ax = [ax]
+
+    if n_panels == 1: ax = [ax]
 
     sig_masks = []
     pval_maps = []
     x_lims = [cfg.tmin_plot, cfg.tmax_plot]
-    for i, (data1, data2) in enumerate(data_by_hemi):
-        # assert data1.shape == data2.shape, f"Shape mismatch in panel {i}"
-            # Determine whether to compute, use provided, or skip
-        if isinstance(sig_mask, bool):
-            if sig_mask:  # sig_mask == True → compute inside
-                if paired:
-                    t_vals, p_vals = ttest_rel(data1, data2, axis=0)
-                    diff = np.mean(data1 - data2, axis=0)
-                else:
-                    t_vals, p_vals = ttest_ind(data1, data2, axis=0)
-                    diff = np.mean(data1,axis=0) - np.mean(data2, axis=0)
-                if fdr:
-                    rej, p_vals_corr = fdrcorrection(p_vals.flatten(), alpha=alpha, method='n', is_sorted=False)
-                    computed_sig_mask = rej.reshape(p_vals.shape)
-                else:
-                    computed_sig_mask = p_vals < alpha
-            else:  # sig_mask == False → don't plot
-                computed_sig_mask = None
-        elif isinstance(sig_mask, np.ndarray):
-            computed_sig_mask = sig_mask
-        else:
-            raise ValueError("sig_mask must be True, False, or an array of the same shape as the data")
 
-        if data_type == 'pac':
-            diff_to_plot = diff.T
-            sig_mask_to_plot = computed_sig_mask.T
-            p_vals_to_plot = p_vals.T
+    for i, (data1, data2) in enumerate(data_by_hemi):
+        # Compute default mask if requested
+        if sig_mask is True:
+            if paired:
+                t_vals, p_vals = ttest_rel(data1, data2, axis=0)
+                diff = np.mean(data1 - data2, axis=0)
+            else:
+                t_vals, p_vals = ttest_ind(data1, data2, axis=0)
+                diff = np.mean(data1, axis=0) - np.mean(data2, axis=0)
+
+            if fdr:
+                rej, p_vals_corr = fdrcorrection(p_vals.flatten(), alpha=alpha, method='n', is_sorted=False)
+                computed_sig_mask = rej.reshape(p_vals.shape) #can also switch this to p_vals_corr if you want the actual corrected p-values
+            else:
+                computed_sig_mask = p_vals < alpha
         else:
-            diff_to_plot = diff
-            sig_mask_to_plot = computed_sig_mask
-            p_vals_to_plot = p_vals
-        if fdr:
-            p_vals_to_plot = p_vals_corr.reshape(p_vals.shape)
+            # fallback if diff not yet computed
+            diff = np.mean(data1 - data2, axis=0) if paired else np.mean(data1, axis=0) - np.mean(data2, axis=0)
+            p_vals = np.ones_like(diff)
+            computed_sig_mask = None
+
+        diff_to_plot = diff.T if data_type=='pac' else diff
+        sig_mask_to_plot = computed_sig_mask.T if (data_type=='pac' and computed_sig_mask is not None) else computed_sig_mask
+        p_vals_to_plot = p_vals.T if data_type=='pac' else p_vals
         sig_masks.append(sig_mask_to_plot)
         pval_maps.append(p_vals_to_plot)
 
+        # Dynamic color limits if not set
         if vmin is None or vmax is None:
-            vmax_plot = np.max(np.abs(diff))
+            vmax_plot = np.max(np.abs(diff_to_plot))
             vmin = -vmax_plot
             vmax = vmax_plot
-            levels = np.linspace(vmin, vmax, cfg.power_plot_lims[2])
 
+        # --- Plot combined figure panel ---
+        cf = plot_tf_panel(ax[i], x_axis, y_axis, diff_to_plot,
+                            sig_mask=sig_mask_to_plot,
+                            extra_masks=extra_masks[i] if extra_masks else None,
+                            cmap=cmap, vmin=vmin, vmax=vmax,
+                            overlay_styles=overlay_styles, add_vlines=add_vlines)
 
-        cf = ax[i].contourf(x_axis, y_axis, diff_to_plot, levels=levels,
-                            cmap=cmap, vmin=vmin, vmax=vmax, extend='both')
-        if add_vlines:
-            for line in cfg.vlines:
-                ax[i].axvline(x=line, color='black', linestyle='--', linewidth=1)
-        if cfg.analysis_type == 'power':
-            ax[i].set_xlim(x_lims)
+        # Axes labels and title
         ax[i].set_title(titles[i])
-        if cfg.analysis_type == 'cross_freq':
-            ax[i].set_xlabel('Driving Frequency (Hz)')
-        else:
-            ax[i].set_xlabel('Time (s)')
-        if i == 0:
+        ax[i].set_xlabel('Time (s)' if cfg.analysis_type!='cross_freq' else 'Driving Frequency (Hz)')
+        if i==0: 
             ax[i].set_ylabel('Frequency (Hz)')
-        else:
+        else: 
             ax[i].set_yticklabels('')
-
-        if sig_mask_to_plot is not None:
-            # Draw significance contours
-            labeled, n_clusters = label(sig_mask_to_plot)
-            for c in range(1, n_clusters + 1):
-                cluster = labeled == c
-                ax[i].contour(x_axis, y_axis, cluster, colors='k', linewidths=1.5)
+        if cfg.analysis_type=='power': ax[i].set_xlim(x_lims)
 
     # Shared colorbar
-    cbar = fig.colorbar(cf, ax=ax, label='Mean Difference', orientation='vertical', ticks=np.linspace(vmin, vmax, 5))
-    # cbar.ax.set_yticklabels(['0', '0.05', '0.5', '0.75'])
+    cbar = fig.colorbar(cf, ax=ax, label='Mean Difference',
+                        orientation='vertical', ticks=np.linspace(vmin, vmax, 5))
+    # --- Masks legend for combined ---
+    if masks_legend and n_panels>1:
+        fig.legend(handles=legend_elements, loc='lower center', bbox_to_anchor=(0.5,0.01),
+                   ncol=len(legend_elements), frameon=True, facecolor='dimgray')
+        fig.subplots_adjust(bottom=0.25)
 
-    # Set figure title
+    # Title
     if analysis_type == 'interaction':
-        full_title = f"Interaction: (ASD {list(cfg.condition.keys())[0]}−{list(cfg.condition.keys())[1]}) − (TD {list(cfg.condition.keys())[0]}−{list(cfg.condition.keys())[1]})"
-
-        cbar.set_label(f'Interaction: (ASD Δ - TD Δ) [{list(cfg.condition.keys())[0]}−{list(cfg.condition.keys())[1]}]')
-    if paired:
+        conds = list(cfg.condition.keys())
+        full_title = f"Interaction: (ASD {conds[0]}−{conds[1]}) − (TD {conds[0]}−{conds[1]})"
+        cbar.set_label(f'Interaction: (ASD Δ - TD Δ) [{conds[0]}−{conds[1]}]')
+    elif paired:
         full_title = "Comparing " + '-'.join([key.capitalize() for key in cfg.condition.keys()]) + f" ({grouping_label.upper()})"
     else:
         full_title = "Comparing " + '-'.join([key.upper() for key in cfg.diagnoses]) + f" ({grouping_label.capitalize()})"
     fig.suptitle(full_title, fontsize=22)
 
-    # Save figure
+    # --- Save combined figure ---
     fname_parts = list(filter(None, [grouping_label, 'tf', 'cluster', 'plot']))
     savename = os.path.join(output_dir, '_'.join(fname_parts) + ".tiff")
     fig.savefig(savename, dpi=300)
     plt.close(fig)
+
+    # --- Save per-hemisphere figures ---
+    for i,(data1,data2) in enumerate(data_by_hemi):
+        diff = np.mean(data1-data2,axis=0) if paired else np.mean(data1,axis=0)-np.mean(data2,axis=0)
+        diff_to_plot = diff.T if data_type=='pac' else diff
+
+        fig_hemi, ax_hemi = plt.subplots(figsize=(7.25,5))
+        cf_hemi = plot_tf_panel(ax_hemi, x_axis, y_axis, diff_to_plot,
+                                 sig_mask=sig_masks[i],
+                                 extra_masks=extra_masks[i] if extra_masks else None,
+                                 cmap=cmap, vmin=vmin, vmax=vmax,
+                                 overlay_styles=overlay_styles, add_vlines=add_vlines)
+
+        ax_hemi.set_title(titles[i])
+        ax_hemi.set_xlabel('Time (s)' if cfg.analysis_type!='cross_freq' else 'Driving Frequency (Hz)')
+        ax_hemi.set_ylabel('Frequency (Hz)')
+        if cfg.analysis_type=='power': ax_hemi.set_xlim(x_lims)
+
+        # Colorbar
+        cbar_hemi = fig_hemi.colorbar(cf_hemi, ax=ax_hemi, ticks=np.linspace(vmin, vmax, 5))
+        cbar_hemi.set_label(cbar.ax.get_ylabel())
+
+        # Masks legend
+        if masks_legend:
+            ax_hemi.legend(handles=legend_elements, loc='lower center', bbox_to_anchor=(0.5,-0.25),
+                           ncol=len(legend_elements), frameon=True, facecolor='dimgray')
+        if analysis_type == 'interaction':
+            conds = list(cfg.condition.keys())
+            full_title = f"Interaction: (ASD {conds[0]}−{conds[1]}) − (TD {conds[0]}−{conds[1]})"
+            cbar.set_label(f'Interaction: (ASD Δ - TD Δ) [{conds[0]}−{conds[1]}]')
+        elif paired:
+            full_title = "Comparing " + '-'.join([key.capitalize() for key in cfg.condition.keys()]) + f" ({grouping_label.upper()})"
+        else:
+            full_title = "Comparing " + '-'.join([key.upper() for key in cfg.diagnoses]) + f" ({grouping_label.capitalize()})"
+        fig_hemi.suptitle(full_title, fontsize=22)
+        hemi_savename = os.path.join(output_dir, f"{grouping_label}_hemi{i+1}_tf_plot.tiff")
+        fig_hemi.savefig(hemi_savename,dpi=300,bbox_inches='tight')
+        plt.close(fig_hemi)
 
     if return_masks:
         return fig, savename, sig_masks, pval_maps
@@ -1929,7 +2069,7 @@ def plot_pval_clusters(p_vals, times, freqs, alpha=0.05, cmap='viridis_r'):
     ax.set_title(f'Significant Clusters (p < {alpha})')
     return fig, ax
 
-def add_pacs_comparison_to_report(df,report,id, analysis_type='within_group'):
+def add_pacs_comparison_to_report(df,report,id, analysis_type='within_group',extra_masks=None):
     low_fq_range = df["low_freqs"].values[0]
     high_fq_range = df["high_freqs"].values[0]
     image_names = []
@@ -1951,7 +2091,8 @@ def add_pacs_comparison_to_report(df,report,id, analysis_type='within_group'):
             fig1, name = plot_tf_comparison(
                         datasets, low_fq_range, high_fq_range, titles,
                         diagnosis, cfg.output_dir, alpha=0.05, paired=True,
-                        cmap='RdBu_r', vmin=None, vmax=None,data_type='pac',
+                        cmap='RdBu_r', vmin=cfg.vmin, vmax=cfg.vmax,data_type='pac',
+                        sig_mask = False,extra_masks=extra_masks, fdr = False,
                         return_masks=False)
             title = '_'.join([id,condition,'pac'])
             #save fig
@@ -1978,7 +2119,8 @@ def add_pacs_comparison_to_report(df,report,id, analysis_type='within_group'):
             fig1, name = plot_tf_comparison(
                         datasets, low_fq_range, high_fq_range, titles,
                         condition, cfg.output_dir, alpha=0.05, paired=False,
-                        cmap='RdBu_r', vmin=None, vmax=None,data_type='pac',
+                        cmap='RdBu_r', vmin=cfg.vmin, vmax=cfg.vmax,data_type='pac',
+                        sig_mask = False,extra_masks=extra_masks, fdr = False,
                         return_masks=False)
             title = '_'.join([id,condition,'pac'])
             #save fig
@@ -2004,12 +2146,25 @@ def add_pacs_comparison_to_report(df,report,id, analysis_type='within_group'):
     report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
     plt.close('all')
 
-def add_tfrs_comparison_to_report(df,report,id,analysis_type='within_group',hemi_label=None):
+def add_tfrs_comparison_to_report(df,report,id,analysis_type='within_group',hemi_label=None,extra_masks=None):
     time = df['time'].values[0]
-    time_to_plot = [find_nearest(time,cfg.tmin_plot),find_nearest(time,cfg.tmax_plot)]
+    start = find_nearest(time, cfg.tmin_plot)
+    end = find_nearest(time, cfg.tmax_plot) + 1
+    end = min(end, len(time))  # ensure we don't exceed array bounds
+    time_to_plot = [start, end]
     time_for_plot = time[time_to_plot[0]:time_to_plot[1]]
     freqs = np.arange(cfg.freq_min,cfg.freq_max+1,1)
-    freq_to_plot = [np.where(freqs==cfg.freq_min_plot)[0][0],np.where(freqs==cfg.freq_max_plot)[0][0]]
+    freq_to_plot = [np.where(freqs==cfg.freq_min_plot)[0][0],np.where(freqs==cfg.freq_max_plot)[0][0]+1]
+    if extra_masks is not None:
+        sliced_extra_masks = []
+        for hemi_masks in extra_masks:
+            sliced_hemi = []
+            for mask in hemi_masks:
+                # Assume time is last dim, freq is first: (freq, time)
+                sliced = mask[freq_to_plot[0]:freq_to_plot[1]] #, time_to_plot[0]:time_to_plot[1]
+                sliced_hemi.append(sliced)
+            sliced_extra_masks.append(sliced_hemi)
+        extra_masks = sliced_extra_masks  # overwrite with cropped versions
     image_names = []
     if analysis_type == 'within_group':
         for diagnosis in cfg.diagnoses:
@@ -2025,21 +2180,25 @@ def add_tfrs_comparison_to_report(df,report,id,analysis_type='within_group',hemi
                         print(f"No data for {diagnosis} in {condition} for {hemi}. Skipping...")
                         continue
                     all_data = np.stack(df_to_plot[cfg.data_var].values)
-                    data = all_data[:,freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
-                    hemi_dataset.append(data)
+                    # data = all_data[:,freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
+                    hemi_dataset.append(all_data)
                 datasets.append(hemi_dataset)
             if hemi_label is None:
                 titles = ['Left Hemisphere', 'Right Hemisphere']
             else:
-                titles = [f'{hemi_label.upper()} Label to Left Hemisphere', f'{hemi_label.upper()} Label to Right Hemisphere']
+                titles = [f'{hemi_label.upper()} Label to LH', f'{hemi_label.upper()} Label to RH']
 
             fig1, name = plot_tf_comparison(
                         datasets, time_for_plot, freqs[freq_to_plot[0]:freq_to_plot[1]], titles,
                         diagnosis, cfg.output_dir, alpha=0.05, paired=True,
-                        cmap= 'RdBu_r', data_type='tf', #'RdBu_r''plasma_r'
-                        return_masks=False,add_vlines=True)
+                        cmap='RdBu_r', vmin=cfg.vmin, vmax=cfg.vmax,data_type='tf',
+                        add_vlines=True,
+                        sig_mask = False,extra_masks=extra_masks, fdr = False,
+                        return_masks=False)
             #save fig
             fig_to_save = fig1.get_figure()
+            if hemi_label is not None:
+                name = name.replace('.tiff', f'_{hemi_label}_tfr_comparison.tiff')
             fig_to_save.savefig(name.replace('.tiff','.svg'),format="svg")
             fig_to_save.savefig(name,dpi=300)
             image_names.append(name)
@@ -2058,19 +2217,21 @@ def add_tfrs_comparison_to_report(df,report,id,analysis_type='within_group',hemi
                         print(f"No data for {diagnosis} in {condition} for {hemi}. Skipping...")
                         continue
                     all_data = np.stack(df_to_plot[cfg.data_var].values)
-                    data = all_data[:,freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
-                    hemi_dataset.append(data)
+                    # data = all_data[:,freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
+                    hemi_dataset.append(all_data)
                 datasets.append(hemi_dataset)
             if hemi_label is None:  
                 titles = ['Left Hemisphere', 'Right Hemisphere']
             else:
-                titles = [f'{hemi_label.upper()} Label to Left Hemisphere', f'{hemi_label.upper()} Label to Right Hemisphere']
+                titles = [f'{hemi_label.upper()} Label to LH', f'{hemi_label.upper()} Label to RH']
 
             fig1, name = plot_tf_comparison(
                         datasets, time_for_plot, freqs[freq_to_plot[0]:freq_to_plot[1]], titles,
                         condition, cfg.output_dir, alpha=0.05, paired=False,
-                        cmap='RdBu_r', data_type='tf', #'RdBu_r''plasma_r'
-                        return_masks=False,add_vlines=True)
+                        cmap='RdBu_r', vmin=cfg.vmin, vmax=cfg.vmax,data_type='tf',
+                        add_vlines=True,
+                        sig_mask = False,extra_masks=extra_masks, fdr = False,
+                        return_masks=False)
             #save fig
             fig_to_save = fig1.get_figure()
             fig_to_save.savefig(name.replace('.tiff','.svg'),format="svg")
@@ -2257,11 +2418,27 @@ def run_glm(data, metadata_df, formula, return_design=False, verbose=True):
     else:
         return betas, pvals
 
-def analyse_interaction(df):
+def analyse_interaction(df,cluster_corrected = False):
     data = np.stack(df[cfg.data_var].values)
+
+    if cfg.analysis_type == 'connectivity':
+        time = df['time'].values[0]
+        start = find_nearest(time, cfg.tmin_plot)
+        end = find_nearest(time, cfg.tmax_plot) + 1
+        end = min(end, len(time))  # ensure we don't exceed array bounds
+        time_to_plot = [start, end]
+        time_for_plot = time[time_to_plot[0]:time_to_plot[1]]
+        freqs = np.arange(cfg.freq_min,cfg.freq_max+1,1)
+        freq_to_plot = [np.where(freqs==cfg.freq_min_plot)[0][0],np.where(freqs==cfg.freq_max_plot)[0][0]]
+        data = data[:,freq_to_plot[0]:freq_to_plot[1],time_to_plot[0]:time_to_plot[1]]
+
     metadata = df[['Diagnosis', 'Condition']].copy()
-    betas, pvals = run_glm(data,metadata,'C(Diagnosis) * C(Condition)')
-    return betas, pvals
+    if cluster_corrected:
+        observed_clusters, p_corrected, pval_map = cluster_permutation_glm(data,metadata,'C(Diagnosis) * C(Condition)','C(Diagnosis)[T.td]:C(Condition)[T.search]' )
+        return observed_clusters, p_corrected, pval_map
+    else:
+        betas, pvals = run_glm(data,metadata,'C(Diagnosis) * C(Condition)')
+        return betas, pvals
 
 def source_modeling(subject,outputdir,subjID_date,visit_date,info,overwrite = False):
     out_fname = find_files('_AttenVis_run01_fwd.fif',outputdir)
@@ -2307,7 +2484,7 @@ def plot_source_modeling(info=None, cerebellum=False, subject=None, subjects_dir
     plot_bem_kwargs = dict(subject=subject, subjects_dir=subjects_dir, brain_surfaces="white", orientation="coronal", slices=[50, 100, 150, 200])
     mne.viz.plot_bem(**plot_bem_kwargs, show=False)
     plt.savefig(f"{subject}_bem.tiff",dpi=300)  
-    close()
+    plt.close()
     # visualize co-rregistration
     corrfig = mne.viz.plot_alignment(info, trans, subject=subject, dig=True, meg=["helmet", "sensors"], src=src, subjects_dir=subjects_dir, surfaces="head")
     corrfig.plotter.screenshot(f"{subject}_correg.tiff") 
@@ -2315,7 +2492,7 @@ def plot_source_modeling(info=None, cerebellum=False, subject=None, subjects_dir
     # visualize source space
     mne.viz.plot_bem(src=src, **plot_bem_kwargs) 
     plt.savefig(f"{subject}_sources.tiff",dpi=300) 
-    close()
+    plt.close()
     # locate images in canvas
     ax1.imshow(plt.imread(f"{subject}_bem.tiff"))
     ax1.axis('off')
@@ -2324,15 +2501,15 @@ def plot_source_modeling(info=None, cerebellum=False, subject=None, subjects_dir
     ax3.imshow(plt.imread(f"{subject}_correg.tiff"))
     ax3.axis('off')
     # delete temporary figures from directory
-    figs2delete = glob(join(getcwd(),'*.tiff'))
-    if bool(figs2delete):
-        for tiff_file in figs2delete:
-            if subject in tiff_file:
-                subprocess.run(["rm",tiff_file])
+    # figs2delete = glob(join(getcwd(),'*.tiff'))
+    # if bool(figs2delete):
+    #     for tiff_file in figs2delete:
+    #         if subject in tiff_file:
+    #             subprocess.run(["rm",tiff_file])
     # update mne report
     if 'fs' in subject:
         fig.suptitle('No MRI available for this visit. Source space computed using fsaverage')
-        subject = split(trans)[1].split('_')[0]
+        subject = os.path.split(trans)[1].split('_')[0]
     else:
         fig.suptitle('Source space computed using subject MRI')
     title   = 'sources' if not cerebellum else 'full sources'
@@ -2353,3 +2530,335 @@ def add_figures_to_report(results):
         plt.close(fig)
 
     report.save(os.path.join(cfg.paradigm_dir,cfg.report_name), verbose=False, overwrite=True)
+
+from tqdm import tqdm
+from joblib import Parallel, delayed
+
+def _permute_once(seed, data, metadata, formula, interaction_idx, threshold):
+    np.random.seed(seed)
+    shuffled_metadata = metadata.copy()
+    shuffled_metadata["Diagnosis"] = np.random.permutation(metadata["Diagnosis"].values)
+
+    # for col in metadata.columns:
+    #     shuffled_metadata[col] = np.random.permutation(shuffled_metadata[col].values)
+
+    perm_betas, perm_pvals, _, _ = run_glm(data, shuffled_metadata, formula, return_design=True)
+    perm_pval_map = perm_pvals[interaction_idx]
+    perm_betas_interaction = perm_betas[interaction_idx]
+
+    perm_clusters, _ = label(perm_pval_map < threshold)
+    
+    # Cluster size
+    sizes = [np.sum(perm_clusters == i) for i in range(1, np.max(perm_clusters) + 1)]
+    max_size = max(sizes) if sizes else 0
+
+    # Cluster mass
+    masses = [np.sum(np.abs(perm_betas_interaction[perm_clusters == i]))
+              for i in range(1, np.max(perm_clusters) + 1)]
+    max_mass = max(masses) if masses else 0
+
+    # Pixel extremes
+    min_max = [np.min(perm_betas_interaction), np.max(perm_betas_interaction)]
+
+    return max_size, max_mass, min_max, perm_betas_interaction
+
+from dataclasses import dataclass
+
+@dataclass
+class PermutationResults:
+    observed_clusters: np.ndarray
+    p_corrected: np.ndarray
+    pval_map: np.ndarray
+    correction_method: str
+    n_permutations: int
+    threshold: float
+    max_sizes: list
+    max_masses: list
+    min_maxes: list
+    perm_betas_all: list
+    term: str
+    formula: str
+
+
+def cluster_permutation_glm(data, metadata, formula, term, n_permutations=1000,
+                            alpha=0.05, threshold=0.05, tail='both',
+                            correct_by='cluster_mass', n_jobs=12):
+    """
+    Run cluster permutation test on GLM interaction term (parallelized).
+
+    Parameters
+    ----------
+    data : ndarray (n_obs, n_freqs, n_times)
+    metadata : pd.DataFrame
+    formula : str, e.g., 'C(Diagnosis) * C(Condition)'
+    term : str, e.g., 'C(Diagnosis)[T.TD]:C(Condition)[T.popout]'
+    n_permutations : int
+    alpha : significance threshold
+    threshold : float, p-value for cluster inclusion
+    tail : 'both', 'pos', or 'neg'
+    correct_by : 'cluster_size', 'pixel', or 'cluster_mass'
+    n_jobs : int, number of cores to use
+
+    Returns
+    -------
+    observed_clusters : labeled array of clusters
+    p_corrected : np.ndarray of shape (n_freqs, n_times)
+    pval_map : np.ndarray of uncorrected p-values
+    """
+
+    # Step 1: Actual data
+    betas, pvals, predictor_names, _ = run_glm(data, metadata, formula, return_design=True)
+    interaction_idx = predictor_names.index(term)
+    pval_map = pvals[interaction_idx]
+    beta_map = betas[interaction_idx]
+
+    observed_clusters, _ = label(pval_map < threshold)
+
+    # Step 2: Permutations (parallel)
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(_permute_once)(
+            seed=i,
+            data=data,
+            metadata=metadata,
+            formula=formula,
+            interaction_idx=interaction_idx,
+            threshold=threshold
+        ) for i in tqdm(range(n_permutations), desc="Permuting")
+    )
+
+    max_sizes = [r[0] for r in results]
+    max_masses = [r[1] for r in results]
+    min_maxes = [r[2] for r in results]
+    perm_betas_all = [r[3] for r in results]
+
+    # Step 3: Correction
+    p_corrected = np.ones_like(pval_map)
+
+    if correct_by == 'cluster_size':
+        null_dist = np.array(max_sizes)
+        for c in range(1, np.max(observed_clusters) + 1):
+            mask = observed_clusters == c
+            size = np.sum(mask)
+            p_val = np.mean(null_dist >= size)
+            p_corrected[mask] = p_val
+
+    elif correct_by == 'cluster_mass':
+        null_dist = np.array(max_masses)
+        for c in range(1, np.max(observed_clusters) + 1):
+            mask = observed_clusters == c
+            mass = np.sum(np.abs(beta_map[mask]))
+            p_val = np.mean(null_dist >= mass)
+            p_corrected[mask] = p_val
+
+    elif correct_by == 'pixel':
+        null_dist = np.array(min_maxes).flatten()
+        lower_pct = threshold / 2 * 100
+        upper_pct = (1 - threshold / 2) * 100
+        lower_thresh, upper_thresh = np.percentile(null_dist, [lower_pct, upper_pct])
+        p_corrected = (beta_map < lower_thresh) | (beta_map > upper_thresh)
+
+    else:
+        raise ValueError(f"Unknown correction method: {correct_by}. Choose 'cluster_size', 'cluster_mass', or 'pixel'.")
+
+    perm_result = PermutationResults(
+        observed_clusters=observed_clusters,
+        p_corrected=p_corrected,
+        pval_map=pval_map,
+        correction_method=correct_by,
+        n_permutations=n_permutations,
+        threshold=threshold,
+        max_sizes=max_sizes,
+        max_masses=max_masses,
+        min_maxes=min_maxes,
+        perm_betas_all=perm_betas_all,
+        term=term,
+        formula=formula
+    )
+
+    # Save the entire result
+    with open(cfg.permutation_data_fname, 'wb') as f:
+        pickle.dump(perm_result, f)
+
+    return observed_clusters, p_corrected, pval_map
+
+
+import subprocess
+
+def send_email_update(cfg, send_html=True):
+    """
+    Send an email with an optional HTML file attached using system's `mail` command.
+    """
+    subject = "Sending analysis update"
+    body = f"The type of analysis performed: {cfg.save_fname}"
+
+    if isinstance(cfg.recipient, (list, tuple)):
+        recipient_str = ' '.join(cfg.recipient)
+    else:
+        recipient_str = cfg.recipient
+
+    if send_html:
+        html_filepath = cfg.report_savename_html
+        # Compose and send using mail with attachment
+        cmd = f'echo "{body}" | mail -s "{subject}" -a "{html_filepath}" {recipient_str}'
+    else:
+        cmd = f'echo "{body}" | mail -s "{subject}" {recipient_str}'
+
+    subprocess.run(cmd, shell=True)
+
+import warnings
+
+def extract_clustered_values(df, masks, alpha=0.05, mask_names=None, summary=None):
+    """
+    Append clustered values (or summary stats) from masks to the DataFrame as new columns.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing arrays in `variable`.
+    variable : str
+        Column name with arrays (e.g., PAC/TF arrays).
+    masks : list of np.ndarray
+        List of masks (boolean or p-value arrays), shape must match arrays.
+    alpha : float
+        Threshold for p-value masks.
+    mask_names : list of str or None
+        Names for each mask column. If None, names are 'mask_0', 'mask_1', ...
+    summary : str or None
+        If 'mean', 'median', or 'max', compute that statistic for each cluster.
+        If None, keep full array values within cluster.
+
+    Returns
+    -------
+    pd.DataFrame
+        Original DataFrame with additional columns for each mask, each containing
+        a list of cluster dicts with keys: ['cluster_id', 'values', 'cluster_map']
+    """
+    if mask_names is None:
+        mask_names = [f"mask_{i}" for i in range(len(masks))]
+    elif len(mask_names) != len(masks):
+        raise ValueError("mask_names length must match number of masks")
+
+    for mname, mask in zip(mask_names, masks):
+        def _extract_clusters(arr):
+            # Convert p-value mask to boolean if necessary
+            mask_bool = mask if mask.dtype == bool else mask < alpha
+            
+            labeled, n_clusters = label(mask_bool)
+            
+            if n_clusters == 0:
+                warnings.warn(f"No significant clusters found in mask '{mname}'")
+                return []
+            
+            clusters_list = []
+            for c in range(1, n_clusters + 1):
+                cluster_mask = labeled == c
+                cluster_values = arr[cluster_mask]
+
+                # Compute summary if requested
+                if summary is None:
+                    val = cluster_values
+                elif summary == "mean":
+                    val = cluster_values.mean()
+                elif summary == "median":
+                    val = np.median(cluster_values)
+                elif summary == "max":
+                    val = cluster_values.max()
+                else:
+                    raise ValueError("summary must be None, 'mean', 'median', or 'max'")
+
+                clusters_list.append({
+                    "cluster_id": c,
+                    "values": val,
+                    "cluster_map": cluster_mask
+                })
+            
+            return clusters_list
+
+        df[mname] = df[cfg.data_var].apply(_extract_clusters)
+
+    def _expand_clusters(clusters, key="values"):
+        """Turn a list of clusters into a dict {cluster_X: value}."""
+        if not isinstance(clusters, list):
+            return {}
+        return {f"{mname}_cluster{c['cluster_id']}_{key}": c.get(key, None)
+                for c in clusters}
+
+    expanded = df[mname].apply(_expand_clusters)
+
+    # Join expanded cluster columns back to df
+    df = df.join(pd.DataFrame(expanded.tolist(), index=df.index))
+    
+    return df
+
+
+def plot_swarmplots_for_report(df, x_var, y_var, report, out_prefix):
+    """
+    Wrapper for barplot_with_swarmplot to plot each condition separately
+    (group on x-axis), save individually, and save a combined figure.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input dataframe with conditions and groups.
+    x_var, y_var : str
+        Variables for plotting (x = group, y = dependent variable).
+    condition_col : str
+        Column name with condition labels.
+    report : mne.Report
+        MNE report object to add the combined figure.
+    out_prefix : str
+        Prefix for saved figure files.
+    save_dir : str
+        Directory to save the output figures.
+    """
+    n_cond = len(cfg.condition)
+    # --- Save each condition separately ---
+    for cond in cfg.condition.keys():
+        sub_df = df[df['Condition'] == cond]
+        fig, ax = plt.subplots(figsize=(6, 5))
+        barplot_with_swarmplot(ax, sub_df, x_var, y_var)
+        ax.set_title(cfg.condition[cond]['label'], fontsize=cfg.fontsize, fontweight="bold")
+        fig.tight_layout()
+        path = f"{cfg.output_dir}/{out_prefix}_{cond}.tiff"
+        fig.savefig(path, dpi=300)
+        plt.close(fig)
+
+    # --- Combined figure with subplots ---
+    fig, axes = plt.subplots(1, n_cond, figsize=(6 * n_cond, 5), sharey=True)
+    if n_cond == 1:  # if only one condition, axes is not iterable
+        axes = [axes]
+
+    for ax, cond in zip(axes, cfg.condition.keys()):
+        sub_df = df[df['Condition'] == cond]
+        barplot_with_swarmplot(ax, sub_df, x_var, y_var)
+        ax.set_title(cfg.condition[cond]['label'], fontsize=cfg.fontsize, fontweight="bold")
+
+    fig.suptitle(f"{out_prefix} - by condition", fontsize=cfg.fontsize+2, weight="bold")
+    fig.tight_layout()
+    combined_path = f"{cfg.output_dir}/{out_prefix}_conditions-combined.tiff"
+    fig.savefig(combined_path, dpi=300)
+
+    # --- Add to report ---
+    report.add_figure(fig=fig, title=f"{out_prefix} by condition", section='gavg', tags=['swarmplot'], replace=True)
+    report.save(cfg.report_savename_hdf5, verbose=False, overwrite=True)
+
+    plt.close(fig)
+
+def extract_time_frequency_data(arr, time, time_window, freqs,freq_window):
+    start = find_nearest(time, time_window[0])
+    end = find_nearest(time, time_window[1]) + 1
+    end = min(end, len(time))
+
+    if freq_window is None:
+        # If no frequency window is specified, return the entire frequency range
+        freq_start = 0
+        freq_end = len(freqs)
+    else:
+        # Find indices for the frequency window
+        if isinstance(freq_window, (list, tuple)) and len(freq_window) == 2:
+            freq_start = np.where(freqs == freq_window[0])[0][0]
+            freq_end   = np.where(freqs == freq_window[1])[0][0] + 1
+        else:
+            raise ValueError("freq_window must be a list or tuple with two elements [start_freq, end_freq]")
+        
+    return arr[freq_start:freq_end, start:end]
