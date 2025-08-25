@@ -95,7 +95,7 @@ for hemi in cfg.hemisphere:
 
 # Extract only RH
 df_RH = df[df["hemisphere"] == 'rh']
-df_RH_clusters = tlbx.extract_clustered_values(df_RH, interaction_by_hemi[1], alpha=0.05, mask_names=['cluster_corrected'], summary='mean')
+df_RH_clusters = tlbx.extract_cluster_values(df_RH, interaction_by_hemi[1], alpha=0.05, mask_names=['cluster_corrected'], summary='mean')
 tlbx.plot_swarmplots_for_report(df_RH_clusters, 'Diagnosis', 'cluster_corrected_cluster1_values', report, out_prefix='RH_pac')
 
 tlbx.show_report(cfg.report_savename_hdf5)

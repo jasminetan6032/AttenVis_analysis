@@ -37,6 +37,8 @@ def get_activations_in_label(sub_id,overwrite_data=False):
                 epochs_clean.save(out_fname,overwrite = True) #always saves epochs with bad epochs removed but without any filtering or baseline correction
             else:
                 epochs_clean = mne.read_epochs(out_fname)
+            # difficulty_mask = (epochs_clean.metadata['difficulty'] =='8') | (epochs_clean.metadata['difficulty']=='10')
+            # select_epochs = epochs_clean[difficulty_mask]
             baseline_evoked = tlbx.get_evoked(epochs_clean,filter=(1,30),baseline=cfg.baseline)
             stc = mne.minimum_norm.apply_inverse(baseline_evoked, inverse_operator, cfg.lambda2, method=cfg.con_method, pick_ori=None, verbose=True)
             for hemi in cfg.hemisphere:

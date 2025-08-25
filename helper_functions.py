@@ -1254,8 +1254,8 @@ def barplot_with_swarmplot(ax,df,x_var,y_var):
     diagnosis = np.unique(df["Diagnosis"].values)[0]
     if np.unique(df[x_var].values)[0] in cfg.diagnoses:
         palette = cfg.color_dict[cond]
-        order = cfg.diagnoses.keys()
-        hue_order = cfg.diagnoses.keys()
+        order = list(cfg.diagnoses.keys())
+        hue_order = list(cfg.diagnoses.keys())
         labels = [info['label'] for key, info in cfg.diagnoses.items()]
     elif np.unique(df[x_var].values)[0] in cfg.selected_conditions:
         palette = cfg.color_dict[diagnosis]
@@ -1268,12 +1268,87 @@ def barplot_with_swarmplot(ax,df,x_var,y_var):
         ax = sns.swarmplot(x=x_var, y=y_var, data=df, color="0", alpha=.35,size = 9,order = order,ax=ax)
         ax.set_title('',fontsize = cfg.fontsize, fontweight="normal")
         ax.set_xlabel('',fontsize = cfg.fontsize, fontweight="normal")
-        ax.set_ylabel('PAC',fontsize = cfg.fontsize, fontweight="normal")
+        ax.set_ylabel(cfg.data_var_label,fontsize = cfg.fontsize, fontweight="normal")
         plt.yticks(fontsize = 16, weight = "normal")
         ax.set_xticklabels(labels=labels)
         plt.xticks(fontsize = 14, weight = "normal",rotation = 45,ha = 'right')
         sns.despine()
     
+    return ax
+
+def swarmplot_with_means(ax, df, x_var, y_var, error=None, mean_line_width=0.4):
+    """
+    Plots a swarmplot with the mean for each category as a horizontal line,
+    optionally adding error bars (SE or SD).
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Ax to plot on.
+    df : pd.DataFrame
+        DataFrame containing the data.
+    x_var : str
+        Column name for x-axis (categorical variable).
+    y_var : str
+        Column name for y-axis (numeric variable).
+    error : str or None
+        'SE' for standard error, 'SD' for standard deviation, None for no error bars.
+    mean_line_width : float
+        Fraction of the category width for the horizontal line representing the mean.
+    """
+    cond = np.unique(df["Condition"].values)[0]
+    diagnosis = np.unique(df["Diagnosis"].values)[0]
+
+    if np.unique(df[x_var].values)[0] in cfg.diagnoses:
+        palette = cfg.color_dict[cond]
+        order = list(cfg.diagnoses.keys())
+        labels = [info['label'] for key, info in cfg.diagnoses.items()]
+    elif np.unique(df[x_var].values)[0] in cfg.selected_conditions:
+        palette = cfg.color_dict[diagnosis]
+        order = cfg.selected_conditions
+        labels = [info['label'] for key, info in cfg.condition.items()]
+    else:
+        palette = None
+        order = np.unique(df[x_var])
+
+    with sns.axes_style('ticks'):
+        # Swarmplot
+        ax = sns.swarmplot(
+            x=x_var, y=y_var, data=df,
+            palette=palette, order=order, size=9, alpha=0.7, ax=ax
+        )
+
+        # Overlay mean as horizontal line with optional error bars
+        for i, category in enumerate(order):
+            data_vals = df[df[x_var] == category][y_var]
+            mean_val = data_vals.mean()
+
+            # Determine width of horizontal line
+            line_half_width = mean_line_width / 2
+            ax.hlines(mean_val, i - line_half_width, i + line_half_width,
+                      color='black', linewidth=3, zorder=10)
+
+            # Error bars
+            if error is not None:
+                if error.lower() == 'se':
+                    err_val = data_vals.sem()
+                elif error.lower() == 'sd':
+                    err_val = data_vals.std()
+                else:
+                    raise ValueError("error must be 'SE', 'SD', or None")
+                ax.errorbar(i, mean_val, yerr=err_val, color='black', capsize=5,
+                            fmt='none', lw=2, zorder=9)
+
+        # Labels and styling
+        ax.set_title('', fontsize=cfg.fontsize, fontweight="normal")
+        ax.set_xlabel('', fontsize=cfg.fontsize, fontweight="normal")
+        ax.set_ylabel(cfg.data_var_label, fontsize=cfg.fontsize, fontweight="normal")
+        ax.set_xticklabels(labels=labels)
+        plt.xticks(fontsize=14, weight="normal", rotation=45, ha='right')
+        plt.yticks(fontsize=16, weight="normal")
+        ax.set_ylim(cfg.ylims)
+        sns.despine()
+
     return ax
 
 def apply_mask(df, variable, mask, flatten=False, summary=None):
@@ -1829,7 +1904,7 @@ def plot_tf_panel(ax, x_axis, y_axis, diff, sig_mask=None, extra_masks=None,
 
     # Extra masks
     if extra_masks is not None and overlay_styles is not None:
-        for i, extra_mask in extra_masks:
+        for i, extra_mask in enumerate(extra_masks):
             mask_to_add = extra_mask if extra_mask.dtype==bool else extra_mask<cfg.alpha
             labeled_extra, n_extra = label(mask_to_add)
             style = overlay_styles[i % len(overlay_styles)] 
@@ -2707,9 +2782,9 @@ def send_email_update(cfg, send_html=True):
 
 import warnings
 
-def extract_clustered_values(df, masks, alpha=0.05, mask_names=None, summary=None):
+def extract_cluster_values(df, masks, alpha=0.05, mask_names=None, summary=None):
     """
-    Append clustered values (or summary stats) from masks to the DataFrame as new columns.
+    Append cluster values (or summary stats) from masks to the DataFrame as new columns.
 
     Parameters
     ----------
@@ -2816,7 +2891,7 @@ def plot_swarmplots_for_report(df, x_var, y_var, report, out_prefix):
     for cond in cfg.condition.keys():
         sub_df = df[df['Condition'] == cond]
         fig, ax = plt.subplots(figsize=(6, 5))
-        barplot_with_swarmplot(ax, sub_df, x_var, y_var)
+        swarmplot_with_means(ax, sub_df, x_var, y_var,error='SE')
         ax.set_title(cfg.condition[cond]['label'], fontsize=cfg.fontsize, fontweight="bold")
         fig.tight_layout()
         path = f"{cfg.output_dir}/{out_prefix}_{cond}.tiff"
@@ -2830,7 +2905,7 @@ def plot_swarmplots_for_report(df, x_var, y_var, report, out_prefix):
 
     for ax, cond in zip(axes, cfg.condition.keys()):
         sub_df = df[df['Condition'] == cond]
-        barplot_with_swarmplot(ax, sub_df, x_var, y_var)
+        swarmplot_with_means(ax, sub_df, x_var, y_var,error='SE')
         ax.set_title(cfg.condition[cond]['label'], fontsize=cfg.fontsize, fontweight="bold")
 
     fig.suptitle(f"{out_prefix} - by condition", fontsize=cfg.fontsize+2, weight="bold")
@@ -2844,21 +2919,68 @@ def plot_swarmplots_for_report(df, x_var, y_var, report, out_prefix):
 
     plt.close(fig)
 
-def extract_time_frequency_data(arr, time, time_window, freqs,freq_window):
-    start = find_nearest(time, time_window[0])
-    end = find_nearest(time, time_window[1]) + 1
-    end = min(end, len(time))
+def extract_time_frequency_data(arr, time, time_window, freqs, freq_window, summary=None, summary_axis=None):
+    """
+    Extracts a time-frequency subset of the input array, with optional summary statistic.
 
+    Parameters
+    ----------
+    arr : np.ndarray
+        2D array of shape [freqs, times].
+    time : np.ndarray
+        1D array of time points.
+    time_window : tuple
+        (tmin, tmax) for time window selection.
+    freqs : np.ndarray
+        1D array of frequencies.
+    freq_window : tuple or None
+        (fmin, fmax) for frequency window selection. If None, all frequencies are used.
+    summary : str or None
+        One of {"mean", "median", "max"} to summarize across the specified axis.
+    summary_axis : str or None
+        Axis to summarize: "time", "freq", "both", or None (no summarization).
+
+    Returns
+    -------
+    np.ndarray
+        Subset of arr, possibly reduced by the summary statistic.
+    """
+    # --- Time window ---
+    start = find_nearest(time, time_window[0])
+    end   = find_nearest(time, time_window[1]) + 1
+    end   = min(end, len(time))
+
+    # --- Frequency window ---
     if freq_window is None:
-        # If no frequency window is specified, return the entire frequency range
-        freq_start = 0
-        freq_end = len(freqs)
+        freq_start, freq_end = 0, len(freqs)
     else:
-        # Find indices for the frequency window
         if isinstance(freq_window, (list, tuple)) and len(freq_window) == 2:
             freq_start = np.where(freqs == freq_window[0])[0][0]
             freq_end   = np.where(freqs == freq_window[1])[0][0] + 1
         else:
-            raise ValueError("freq_window must be a list or tuple with two elements [start_freq, end_freq]")
-        
-    return arr[freq_start:freq_end, start:end]
+            raise ValueError("freq_window must be [start_freq, end_freq]")
+
+    # --- Slice ---
+    subset = arr[freq_start:freq_end, start:end]
+
+    # --- Summarization ---
+    if summary_axis is None:
+        return subset
+
+    # Determine axis indices
+    axes_to_collapse = []
+    if summary_axis in ["time", "both"]:
+        axes_to_collapse.append(-1)
+    if summary_axis in ["freq", "both"]:
+        axes_to_collapse.append(0)
+
+    if summary is None:
+        return subset
+    elif summary == "mean":
+        return subset.mean(axis=tuple(axes_to_collapse))
+    elif summary == "median":
+        return np.median(subset, axis=tuple(axes_to_collapse))
+    elif summary == "max":
+        return subset.max(axis=tuple(axes_to_collapse))
+    else:
+        raise ValueError("summary must be None, 'mean', 'median', or 'max'")

@@ -107,13 +107,13 @@ for hemi in cfg.hemisphere:
 tlbx.add_tfrs_to_report(df,report,'gavg')
 tlbx.add_tfrs_comparison_to_report(df,report,'gavg',analysis_type = 'within_group',extra_masks=interaction_by_hemi)
 tlbx.add_tfrs_comparison_to_report(df,report,'gavg',analysis_type = 'between_group',extra_masks=interaction_by_hemi )
-# tlbx.add_fsaverage_to_report(report,df,cfg.labels_of_interest[0] + '_grown')
+tlbx.add_fsaverage_to_report(report,df,cfg.labels_of_interest[0] + '_grown')
 
-df['power_to_plot'] = df_hemi['power'].apply(lambda arr: tlbx.extract_time_frequency_data(arr, time, (0.8,1.1), freqs, None))
+df['power_to_plot'] = df['power'].apply(lambda arr: tlbx.extract_time_frequency_data(arr, time, (0.8,1.1), freqs, None,summary='mean',summary_axis='both'))
 
 for hemi in cfg.hemisphere:
     df_hemi = df[df["hemisphere"] == hemi]
-    tlbx.plot_swarmplots_for_report(df_hemi, 'Diagnosis', 'power_to_plot', report, out_prefix= '_'.join([hemi, str(cfg.freq_min), str(cfg.freq_max), 'power']))
+    tlbx.plot_swarmplots_for_report(df_hemi, 'Diagnosis', 'power_to_plot', report, out_prefix= '_'.join([hemi, str(cfg.freq_min_plot), str(cfg.freq_max_plot), 'power']))
 
 tlbx.show_report(cfg.report_savename_hdf5)
 

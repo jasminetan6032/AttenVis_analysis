@@ -4,6 +4,7 @@ local_dir = '/autofs/space/hypatia_002/users/Jasmine/'
 paradigm = 'AttenVis'
 analysis_type = 'power' 
 data_var = 'power'
+data_var_label = 'Power'
 recipient = 'jtan15@mgh.harvard.edu'
 if paradigm == 'Misophonia_ASD_TD':
     data_dir = os.path.join(local_dir, 'Misophonia',paradigm)
@@ -13,7 +14,7 @@ savedir = os.path.join(data_dir,'analyses',analysis_type)
 
 #experiment details 
 condition = {
-            'search': {'label':'Search', 'color': 'purple'},
+            'search': {'label':'Search', 'color': 'darkorchid'},
             'pop-out': {'label':'Pop-out', 'color': 'green'}
             #  'conditions_combined': {'label':'Combined'}
              }
@@ -77,8 +78,8 @@ baseline      = (-0.5,0.0)
 #plotting settings
 tmin_plot               =  -0.3 #-1.5 #-0.3
 tmax_plot               =  1.5 #0.5 #1.5
-freq_min_plot           = 4 
-freq_max_plot           = 12
+freq_min_plot           = 60
+freq_max_plot           = 120
 power_line_plot_ylims   = (-0.05,0.05)
 power_plot_lims         = [-0.05,0.05,40,5] #min, max, division,division for colorbar
 crossfreq_plot_lims     = [0,0.15,15,7] #min, max, division,division for colorbar
@@ -88,7 +89,7 @@ vmin                    = -0.055
 vmax                    = 0.055
 fontsize                = 20
 confidence              = 0.95 #ci interval for line plots
-ylims                   = (0,10)
+ylims                   = (-0.2,0.2)#(0,10)
 zcoh_ylims              = (-2.0,2.0)
 
 labels_dict = {
@@ -125,7 +126,7 @@ if 'electrodes' not in labels_of_interest:
 connectivity_labels = ['V1','cingulate']
 seed_label = labels_dict[connectivity_labels[0]]#['auditory_grown']
 target_label = labels_dict[connectivity_labels[1]]
-selected_conditions = ['target','search','pop-out']
+selected_conditions = ['search','pop-out']
 
 #save locations and names
 if analysis_type == 'connectivity':
@@ -183,18 +184,24 @@ report_title = '_'.join(list(condition.keys()) + labels_of_interest + [con_metho
 
 from matplotlib.colors import to_hex, to_rgb
 
-# Generate hierarchical color dictionary
+def interpolate_color(color, target=(1, 1, 1), factor=0.5):
+    """
+    Interpolates between a color and a target (white by default).
+    factor=0 returns the original color, factor=1 returns the target.
+    """
+    return tuple((1 - factor) * c + factor * t for c, t in zip(color, target))
+
 color_dict = {}
 
 for cond_key, cond_info in condition.items():
-    base_rgb = to_rgb(cond_info['color'])  # read base color from condition dict
+    base_rgb = to_rgb(cond_info['color'])
     color_dict[cond_key] = {}
     
     n_groups = len(diagnoses)
     for i, (diag_key, diag_info) in enumerate(diagnoses.items()):
-        # Linear shading: darker for first group, lighter for last
-        factor = 0.7 + 0.5 * i / (n_groups - 1) if n_groups > 1 else 1.0
-        shade_rgb = [min(c * factor, 1.0) for c in base_rgb]
+        # factor goes from 0 (original color) to 1 (white/lighter)
+        factor = i / (n_groups - 1) if n_groups > 1 else 0
+        shade_rgb = tuple(c + (1 - c) * 0.4 * factor for c in base_rgb)
         color_dict[cond_key][diag_key] = to_hex(shade_rgb)
 
 #recons and fsaverage directories
